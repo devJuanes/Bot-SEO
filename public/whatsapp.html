@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhatsApp Inbox // MatuByte</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="stars" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar chrome">
+      <div class="brand">
+        <a class="pixel" href="/" style="text-decoration:none;color:inherit">← COCKPIT</a>
+        <span class="orbit">WHATSAPP INBOX</span>
+      </div>
+      <div class="status-pills">
+        <span id="waStatusPill" class="pill">--</span>
+        <button id="newCampaignBtn" class="btn">NUEVA CAMPAÑA</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section id="campaignForm" class="panel chrome" style="display:none">
+        <div class="section-head"><h2>⚡ NUEVA CAMPAÑA (plantilla aprobada por Meta)</h2></div>
+        <form id="campaignFormEl" class="chat-form" style="grid-template-columns: 1fr; gap: 0.75rem;">
+          <input name="name" placeholder="Nombre de la campaña" required
+            style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
+          <input name="templateName" placeholder="Nombre exacto de la plantilla (Meta)" required
+            style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
+          <input name="templateLanguage" placeholder="Idioma plantilla (ej: es)" value="es"
+            style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
+          <input name="appSlug" placeholder="Slug de app a ofrecer (opcional, ej: matucrm)"
+            style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
+          <input name="bodyParams" placeholder="Params separados por coma (ej: {{name}},{{sector}})"
+            style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
+          <input name="sector" placeholder="Filtrar por sector (opcional, ej: peluquerias)"
+            style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
+          <input name="city" placeholder="Filtrar por ciudad (opcional, ej: Cali)"
+            style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
+          <button class="btn" type="submit">LANZAR CAMPAÑA</button>
+        </form>
+        <p class="hint">
+          La plantilla debe existir y estar APROBADA en Meta Business Manager antes de usarla aquí.
+          Placeholders soportados en params: {{name}}, {{sector}}, {{city}}.
+        </p>
+      </section>
+
+      <section class="split">
+        <div class="panel chrome">
+          <div class="section-head"><h2>◈ CONVERSACIONES</h2></div>
+          <div id="conversationsList" class="leads-table" style="max-height: 520px"></div>
+        </div>
+        <div class="panel chrome">
+          <div class="section-head"><h2>⚡ CAMPAÑAS</h2></div>
+          <div id="campaignsList" class="leads-table" style="max-height: 520px"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      MatuByte S.A.S. · WhatsApp Cloud API · docs/CONFIGURACION.md
+    </footer>
+
+    <script src="/whatsapp.js" type="module"></script>
+  </body>
+</html>

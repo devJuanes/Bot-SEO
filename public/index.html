@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MatuByte // GROWTH OS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="stars" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar chrome">
+      <div class="brand">
+        <span class="pixel">MATUBYTE</span>
+        <span class="orbit">GROWTH OS · Y2K · P4</span>
+      </div>
+      <div class="status-pills">
+        <a href="/whatsapp.html" class="pill lime" style="text-decoration:none">WHATSAPP</a>
+        <span id="autopilotPill" class="pill">AUTOPILOT --</span>
+        <span id="phasePill" class="pill cyan">PHASE 5</span>
+        <span id="clockPill" class="pill lime">00:00:00</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="hero chrome">
+        <div>
+          <p class="eyebrow">FÁBRICA DE GROWTH · MAPS + EMPLEOS + GOV + FOROS</p>
+          <h1>Robot Cockpit</h1>
+          <p class="lede">
+            Entra a cada robot, chatea, mira logs y alimenta apps con tokens.
+            Config: <code>docs/CONFIGURACION.md</code>
+          </p>
+        </div>
+        <div class="hero-stats">
+          <div class="stat">
+            <span class="stat-label">LEADS</span>
+            <span id="statLeads" class="stat-value">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">OPPS</span>
+            <span id="statOpps" class="stat-value">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">BLOGS</span>
+            <span id="statBlogs" class="stat-value">0</span>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h2>◆ AGENTS ONLINE · click para chat</h2>
+          <button id="refreshBtn" class="btn">SYNC</button>
+        </div>
+        <div id="agentsGrid" class="agents-grid"></div>
+      </section>
+
+      <section class="split">
+        <div class="panel chrome">
+          <div class="section-head"><h2>▣ LIVE LOGS</h2></div>
+          <div id="logTerminal" class="terminal"></div>
+        </div>
+        <div class="panel chrome">
+          <div class="section-head"><h2>⇄ AGENT BUS</h2></div>
+          <div id="busFeed" class="bus-feed"></div>
+        </div>
+      </section>
+
+      <section class="split">
+        <div class="panel chrome">
+          <div class="section-head"><h2>◎ LEADS</h2></div>
+          <div id="leadsTable" class="leads-table"></div>
+        </div>
+        <div class="panel chrome">
+          <div class="section-head"><h2>⚡ OPPORTUNITIES</h2></div>
+          <div id="oppsTable" class="leads-table"></div>
+        </div>
+      </section>
+
+      <section class="panel chrome">
+        <div class="section-head"><h2>✎ BRIEFS → BLOGS & SOCIAL</h2></div>
+        <div id="contentTable" class="leads-table"></div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      MatuByte S.A.S. · Cali · docs/CONFIGURACION.md · npm run migrate
+    </footer>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

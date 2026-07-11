@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Agent Detail // MatuByte</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="stars" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar chrome">
+      <div class="brand">
+        <a class="pixel" href="/" style="text-decoration:none;color:inherit">← COCKPIT</a>
+        <span class="orbit" id="agentTitle">AGENT</span>
+      </div>
+      <div class="status-pills">
+        <span id="agentStatus" class="pill cyan">--</span>
+        <button id="runBtn" class="btn">RUN</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="hero chrome">
+        <div>
+          <p class="eyebrow" id="agentRole">ROLE</p>
+          <h1 id="agentName">Agent</h1>
+          <p class="lede" id="agentDesc"></p>
+          <p class="lede" id="agentCaps"></p>
+        </div>
+        <div class="hero-stats">
+          <div class="stat">
+            <span class="stat-label">RUNS</span>
+            <span id="statRuns" class="stat-value">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">OK</span>
+            <span id="statOk" class="stat-value">0</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">ERR</span>
+            <span id="statErr" class="stat-value">0</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel chrome chat-panel">
+        <div class="section-head"><h2>◈ CHAT CON EL AGENTE</h2></div>
+        <div id="chatLog" class="terminal chat-log"></div>
+        <form id="chatForm" class="chat-form">
+          <input id="chatInput" type="text" placeholder="Pregúntale qué está haciendo, nichos, errores…" autocomplete="off" />
+          <button class="btn" type="submit">SEND</button>
+        </form>
+        <p class="hint">Requiere LLM_API_KEY real en .env · ver docs/CONFIGURACION.md</p>
+      </section>
+    </main>
+
+    <script src="/agent.js" type="module"></script>
+  </body>
+</html>

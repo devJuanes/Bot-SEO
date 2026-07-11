@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Conversación WhatsApp // MatuByte</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="stars" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar chrome">
+      <div class="brand">
+        <a class="pixel" href="/whatsapp.html" style="text-decoration:none;color:inherit">← INBOX</a>
+        <span class="orbit" id="threadTitle">CONVERSACIÓN</span>
+      </div>
+      <div class="status-pills">
+        <span id="modePill" class="pill">--</span>
+        <button id="toggleModeBtn" class="btn">TOMAR CONTROL</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel chrome chat-panel">
+        <div class="section-head"><h2>◈ MENSAJES</h2></div>
+        <div id="chatLog" class="terminal chat-log"></div>
+        <form id="replyForm" class="chat-form">
+          <input id="replyInput" type="text" placeholder="Escribe una respuesta manual…" autocomplete="off" />
+          <button class="btn" type="submit">SEND</button>
+        </form>
+        <p class="hint">Enviar una respuesta manual pasa la conversación a modo humano automáticamente.</p>
+      </section>
+    </main>
+
+    <script src="/whatsapp-thread.js" type="module"></script>
+  </body>
+</html>
