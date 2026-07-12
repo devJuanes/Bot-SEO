@@ -1,6 +1,7 @@
 import { blogWriterAgent } from './blog-writer.js';
 import { communityAgentAgent } from './community-agent.js';
 import { contentRadarAgent } from './content-radar.js';
+import { facebookPublisherAgent } from './facebook-publisher.js';
 import { infiltratorAgent } from './infiltrator.js';
 import { leadHunterAgent } from './lead-hunter/index.js';
 import { opportunityScoutAgent } from './opportunity-scout/index.js';
@@ -15,6 +16,7 @@ const agents: Agent[] = [
   blogWriterAgent,
   socialCreatorAgent,
   communityAgentAgent,
+  facebookPublisherAgent,
 ];
 
 const agentsById = new Map<AgentId, Agent>(

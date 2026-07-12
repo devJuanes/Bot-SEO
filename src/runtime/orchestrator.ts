@@ -23,6 +23,7 @@ const AGENT_TIMEOUT_MS: Record<AgentId, number> = {
   'blog-writer': 4 * 60_000,
   'social-creator': 4 * 60_000,
   'community-agent': 3 * 60_000,
+  'facebook-publisher': 4 * 60_000,
 };
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -194,6 +195,18 @@ export async function executeAgent(
       });
     }
 
+    if (id === 'facebook-publisher' && ok) {
+      const details = outcome.result.details ?? {};
+      const published = details.fb_post_id ? 'publicado' : 'dry-run';
+      sendAgentMessage({
+        from: 'facebook-publisher',
+        to: 'broadcast',
+        topic: 'facebook.published',
+        body: `FB ${published}: ${String(details.topic ?? 'post')}`,
+        payload: details,
+      });
+    }
+
     return outcome;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -222,6 +235,7 @@ export function startAutopilot(log: FastifyBaseLogger): void {
     'social-creator',
     'community-agent',
     'infiltrator',
+    'facebook-publisher',
   ];
 
   let cursor = 0;

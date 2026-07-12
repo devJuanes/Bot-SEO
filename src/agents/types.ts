@@ -8,7 +8,8 @@ export type AgentId =
   | 'content-radar'
   | 'blog-writer'
   | 'social-creator'
-  | 'community-agent';
+  | 'community-agent'
+  | 'facebook-publisher';
 
 export type AgentRunStatus = 'ok' | 'skipped' | 'error';
 

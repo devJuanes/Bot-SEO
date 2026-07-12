@@ -135,6 +135,18 @@ const DEFAULT_AGENTS: Array<Omit<AgentDefinition, 'is_active'> & { is_active?: b
     is_chat_enabled: true,
     sort_order: 7,
   },
+  {
+    id: 'facebook-publisher',
+    name: 'Agente Facebook Publisher',
+    role: 'facebook_publisher',
+    description:
+      'Detecta tendencias (Reddit/News/LLM), genera posts y publica directo en la página de Facebook de MatuByte vía Meta Graph API.',
+    capabilities: ['facebook', 'trends', 'meta_graph', 'publish'],
+    system_prompt:
+      'Eres el Publisher de Facebook de MatuByte. Creas posts con gancho, en español, basados en tendencias reales del mercado.',
+    is_chat_enabled: true,
+    sort_order: 8,
+  },
 ];
 
 export async function seedAgentDefinitions(): Promise<void> {
@@ -398,8 +410,13 @@ export async function insertContentScript(input: {
   seo_copy?: string;
   hashtags?: string[];
   metadata?: Record<string, unknown>;
-}): Promise<void> {
-  const { error } = await withRetry<{ error: unknown }>(() =>
+  /** Tracking de Facebook — todos opcionales para no romper otros agentes */
+  fb_photo_url?: string | null;
+  trend_source?: string | null;
+  trend_url?: string | null;
+  publish_status?: 'draft' | 'published' | 'failed' | 'skipped';
+}): Promise<string | null> {
+  const { data, error } = await withRetry<{ error: unknown; data: unknown }>(() =>
     db.from('content_scripts').insert({
       platform: input.platform,
       topic: input.topic,
@@ -409,9 +426,87 @@ export async function insertContentScript(input: {
       hashtags: input.hashtags ?? [],
       status: 'draft',
       metadata: input.metadata ?? {},
+      fb_photo_url: input.fb_photo_url ?? null,
+      trend_source: input.trend_source ?? null,
+      trend_url: input.trend_url ?? null,
+      publish_status: input.publish_status ?? 'draft',
     }),
   );
   if (error) throw new Error(`insertContentScript: ${errMsg(error)}`);
+  const row = (Array.isArray(data) ? data[0] : data) as { id?: string } | undefined;
+  return row?.id ?? null;
+}
+
+/**
+ * Update del estado de publicación de Facebook sobre un content_script existente.
+ * Se llama desde el agente tras pegar a Meta, o desde el endpoint /retry.
+ */
+export interface FbPublishPatch {
+  fb_post_id?: string;
+  fb_permalink_url?: string;
+  fb_published_at?: string;
+  publish_status?: 'draft' | 'published' | 'failed' | 'skipped';
+  error_message?: string | null;
+}
+
+export async function updateContentScriptFb(
+  id: string,
+  patch: FbPublishPatch,
+): Promise<void> {
+  const clean: Record<string, unknown> = {};
+  if (patch.fb_post_id !== undefined) clean.fb_post_id = patch.fb_post_id;
+  if (patch.fb_permalink_url !== undefined) clean.fb_permalink_url = patch.fb_permalink_url;
+  if (patch.fb_published_at !== undefined) clean.fb_published_at = patch.fb_published_at;
+  if (patch.publish_status !== undefined) clean.publish_status = patch.publish_status;
+  if (patch.error_message !== undefined) clean.error_message = patch.error_message;
+  clean.updated_at = new Date().toISOString();
+
+  const { error } = await db.from('content_scripts').eq('id', id).update(clean);
+  if (error) throw new Error(`updateContentScriptFb: ${errMsg(error)}`);
+}
+
+/**
+ * Devuelve las URLs de trend_url usadas en los últimos N días.
+ * Sirve para que el agente no repita tendencia.
+ */
+export async function listRecentTrendUrls(daysBack = 7): Promise<string[]> {
+  const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await db
+    .from('content_scripts')
+    .select('trend_url')
+    .eq('platform', 'facebook')
+    .not('trend_url', 'is', null)
+    .gte('created_at', since);
+  if (error) throw new Error(`listRecentTrendUrls: ${errMsg(error)}`);
+  return ((data ?? []) as Array<{ trend_url: string }>)
+    .map((row) => row.trend_url)
+    .filter(Boolean);
+}
+
+export async function listFailedFbPosts(limit = 20): Promise<
+  Array<Record<string, unknown>>
+> {
+  const { data, error } = await db
+    .from('content_scripts')
+    .select('*')
+    .eq('platform', 'facebook')
+    .eq('publish_status', 'failed')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`listFailedFbPosts: ${errMsg(error)}`);
+  return (data ?? []) as Array<Record<string, unknown>>;
+}
+
+export async function getContentScriptById(
+  id: string,
+): Promise<Record<string, unknown> | null> {
+  const { data, error } = await db
+    .from('content_scripts')
+    .select('*')
+    .eq('id', id)
+    .limit(1);
+  if (error) throw new Error(`getContentScriptById: ${errMsg(error)}`);
+  return ((data ?? [])[0] as Record<string, unknown> | undefined) ?? null;
 }
 
 export async function insertBlogPost(input: {

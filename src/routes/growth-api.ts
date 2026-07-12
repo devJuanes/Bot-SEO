@@ -2,18 +2,31 @@ import type { FastifyInstance } from 'fastify';
 import {
   createAppConnection,
   getAgentDefinition,
+  getContentScriptById,
   listAgentDefinitions,
   listAppConnections,
   listBlogPosts,
   listChatMessages,
   listContentScripts,
+  listFailedFbPosts,
   listOpportunities,
   listSiteKnowledge,
+  updateContentScriptFb,
   upsertSiteKnowledge,
 } from '../db/growth.js';
 import { chatWithAgent } from '../services/agent-chat.js';
 import { getAgentState } from '../runtime/state.js';
 import { executeAgent } from '../runtime/orchestrator.js';
+import { env } from '../config/env.js';
+import {
+  isFacebookConfigured,
+  isFacebookDryRun,
+  publishDryRun,
+  publishFeedPost,
+  publishPhotoPost,
+  publishWithRetry,
+} from '../facebook/client.js';
+import { fetchInternalSignals, fetchTrendingTopics } from '../facebook/trends.js';
 import type { AgentId } from '../agents/types.js';
 
 export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
@@ -146,4 +159,155 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
     blogs: await listBlogPosts(20),
     scripts: await listContentScripts(20),
   }));
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Facebook Publisher endpoints
+  // ─────────────────────────────────────────────────────────────────────
+
+  app.get<{ Querystring: { limit?: string } }>(
+    '/api/facebook/posts',
+    async (request) => {
+      const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 20)));
+      const { db } = await import('../db/matu.js');
+      const { data, error } = await db
+        .from('content_scripts')
+        .select('*')
+        .eq('platform', 'facebook')
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      if (error) {
+        return { error: error.message ?? String(error), posts: [] };
+      }
+      return { posts: (data ?? []) as Record<string, unknown>[] };
+    },
+  );
+
+  app.get('/api/facebook/failed', async () => ({
+    failed: await listFailedFbPosts(20),
+  }));
+
+  app.get('/api/facebook/config', async () => ({
+    enabled: env.FB_PUBLISHER_ENABLED === true,
+    dryRun: isFacebookDryRun(),
+    configured: isFacebookConfigured(),
+    pageId: env.FB_PAGE_ID ?? null,
+    hasToken: Boolean(env.FB_PAGE_ACCESS_TOKEN),
+    graphVersion: env.FB_GRAPH_VERSION,
+  }));
+
+  app.get<{ Querystring: { sources?: string } }>(
+    '/api/facebook/trends/preview',
+    async (request) => {
+      const requested = (request.query.sources ?? 'news,reddit')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const tasks: Array<Promise<unknown[]>> = [];
+      if (requested.includes('news')) {
+        tasks.push(
+          fetchTrendingTopics({ source: 'news' }).catch(() => []),
+        );
+      }
+      if (requested.includes('reddit')) {
+        tasks.push(
+          fetchTrendingTopics({ source: 'reddit' }).catch(() => []),
+        );
+      }
+      const settled = await Promise.all(tasks);
+      const items = settled.flat();
+      const signalsText = requested.includes('internal')
+        ? await fetchInternalSignals().catch(() => '')
+        : '';
+      return {
+        sources: requested,
+        count: items.length,
+        items: items.slice(0, 30),
+        internalSignalsText: signalsText || undefined,
+      };
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { forceDryRun?: boolean } }>(
+    '/api/facebook/posts/:id/retry',
+    async (request, reply) => {
+      const existing = await getContentScriptById(request.params.id);
+      if (!existing) return reply.code(404).send({ error: 'Post no encontrado' });
+      if (existing.platform !== 'facebook') {
+        return reply.code(400).send({ error: 'El post no pertenece a Facebook' });
+      }
+      if (existing.publish_status === 'published') {
+        return reply
+          .code(409)
+          .send({ error: 'El post ya está publicado', post: existing });
+      }
+
+      const forceDryRun = Boolean(request.body?.forceDryRun);
+      const dryRun = forceDryRun || isFacebookDryRun();
+      if (!dryRun && !isFacebookConfigured()) {
+        return reply
+          .code(409)
+          .send({ error: 'Facebook no configurado y dry-run desactivado' });
+      }
+
+      const message = String(existing.script_body ?? '');
+      const photoUrl =
+        typeof existing.fb_photo_url === 'string' ? existing.fb_photo_url : null;
+
+      try {
+        const result = await (async () => {
+          if (dryRun) {
+            return publishDryRun(photoUrl ? 'photos' : 'feed', {
+              message,
+              imageUrl: photoUrl ?? undefined,
+            });
+          }
+          if (photoUrl) {
+            return publishWithRetry(
+              () => publishPhotoPost(photoUrl, message),
+              'fb-photo-retry',
+            );
+          }
+          return publishWithRetry(
+            () => publishFeedPost(message),
+            'fb-feed-retry',
+          );
+        })();
+
+        await updateContentScriptFb(request.params.id, {
+          fb_post_id: result.fbPostId ?? undefined,
+          fb_permalink_url: result.fbPermalinkUrl ?? undefined,
+          fb_published_at: new Date().toISOString(),
+          publish_status: 'published',
+          error_message: null,
+        });
+
+        const updated = await getContentScriptById(request.params.id);
+        return { ok: true, dryRun, post: updated };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await updateContentScriptFb(request.params.id, {
+          publish_status: 'failed',
+          error_message: message.slice(0, 1000),
+        }).catch(() => undefined);
+        return reply.code(502).send({ error: message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: { reason?: string } }>(
+    '/api/facebook/posts/:id/mark-failed',
+    async (request, reply) => {
+      const existing = await getContentScriptById(request.params.id);
+      if (!existing) return reply.code(404).send({ error: 'Post no encontrado' });
+      if (existing.platform !== 'facebook') {
+        return reply.code(400).send({ error: 'El post no pertenece a Facebook' });
+      }
+      await updateContentScriptFb(request.params.id, {
+        publish_status: 'failed',
+        error_message: String(request.body?.reason ?? 'Marcado manualmente'),
+      });
+      const updated = await getContentScriptById(request.params.id);
+      return { ok: true, post: updated };
+    },
+  );
 }

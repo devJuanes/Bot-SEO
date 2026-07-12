@@ -332,3 +332,20 @@ CREATE TABLE IF NOT EXISTS site_knowledge (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Facebook Publisher: tracking de publicación en página de Facebook (Meta Graph API)
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS fb_post_id VARCHAR(100);
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS fb_permalink_url TEXT;
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS fb_published_at TIMESTAMPTZ;
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS fb_photo_url TEXT;
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS publish_status VARCHAR(20) NOT NULL DEFAULT 'draft';
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS error_message TEXT;
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS trend_source VARCHAR(50);
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS trend_url TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_content_scripts_publish_status
+  ON content_scripts(publish_status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_content_scripts_platform_published
+  ON content_scripts(platform, fb_published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_content_scripts_trend_url
+  ON content_scripts(trend_url);

@@ -69,6 +69,14 @@ const envSchema = z.object({
     .min(1)
     .default('hablar con alguien,agente humano,asesor,hablar con una persona,humano por favor'),
 
+  // Facebook Pages API (Meta Graph) — agente facebook-publisher
+  // Documentación: https://developers.facebook.com/docs/pages-api
+  FB_PUBLISHER_ENABLED: booleanFromEnv,
+  FB_DRY_RUN: booleanFromEnv,
+  FB_PAGE_ID: z.string().optional().or(z.literal('')),
+  FB_PAGE_ACCESS_TOKEN: z.string().optional().or(z.literal('')),
+  FB_GRAPH_VERSION: z.string().min(1).default('v21.0'),
+
   LEAD_HUNTER_CITY: z.string().min(1).default('Cali'),
   LEAD_HUNTER_SECTOR: z.string().optional().or(z.literal('')),
   LEAD_HUNTER_QUERY: z.string().optional().or(z.literal('')),
@@ -85,6 +93,7 @@ const envSchema = z.object({
   CRON_BLOG_WRITER: z.string().min(1).default('0 8 * * *'),
   CRON_SOCIAL_CREATOR: z.string().min(1).default('0 9 * * *'),
   CRON_COMMUNITY_AGENT: z.string().min(1).default('0 */3 * * *'),
+  CRON_FACEBOOK_PUBLISHER: z.string().min(1).default('0 10,16,22 * * *'),
 });
 
 export type Env = z.infer<typeof envSchema> & {
@@ -94,6 +103,8 @@ export type Env = z.infer<typeof envSchema> & {
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_BUSINESS_ACCOUNT_ID?: string;
   META_APP_SECRET?: string;
+  FB_PAGE_ID?: string;
+  FB_PAGE_ACCESS_TOKEN?: string;
 };
 
 function loadEnv(): Env {
@@ -116,6 +127,12 @@ function loadEnv(): Env {
     process.env.HEADLESS_MODE = 'true';
   }
 
+  // Default FB_DRY_RUN=true en dev para evitar publicaciones accidentales.
+  // En prod el usuario debe ponerlo false explícitamente.
+  if (process.env.FB_DRY_RUN === undefined || process.env.FB_DRY_RUN === '') {
+    process.env.FB_DRY_RUN = 'true';
+  }
+
   const parsed = envSchema.safeParse(process.env);
 
   if (!parsed.success) {
@@ -135,6 +152,8 @@ function loadEnv(): Env {
     WHATSAPP_PHONE_NUMBER_ID: parsed.data.WHATSAPP_PHONE_NUMBER_ID || undefined,
     WHATSAPP_BUSINESS_ACCOUNT_ID: parsed.data.WHATSAPP_BUSINESS_ACCOUNT_ID || undefined,
     META_APP_SECRET: parsed.data.META_APP_SECRET || undefined,
+    FB_PAGE_ID: parsed.data.FB_PAGE_ID || undefined,
+    FB_PAGE_ACCESS_TOKEN: parsed.data.FB_PAGE_ACCESS_TOKEN || undefined,
   };
 }
 

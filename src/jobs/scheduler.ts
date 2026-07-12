@@ -20,6 +20,7 @@ const cronMap: Array<{ agentId: AgentId; expression: string }> = [
   { agentId: 'blog-writer', expression: env.CRON_BLOG_WRITER },
   { agentId: 'social-creator', expression: env.CRON_SOCIAL_CREATOR },
   { agentId: 'community-agent', expression: env.CRON_COMMUNITY_AGENT },
+  { agentId: 'facebook-publisher', expression: env.CRON_FACEBOOK_PUBLISHER },
 ];
 
 export function startScheduler(log: FastifyBaseLogger): void {
