@@ -88,14 +88,33 @@ export async function handleIncomingWhatsAppMessage(input: {
   });
 
   if (conversation.mode === 'human') {
-    sendAgentMessage({
-      from: 'whatsapp-bot',
-      to: 'broadcast',
-      topic: 'whatsapp.human_pending',
-      body: `Nuevo mensaje en conversación humana: ${input.profileName ?? input.waId}`,
-      payload: { conversationId: conversation.id },
+    // Si el humano (o el bot) ya respondió el último mensaje, el cliente está
+    // escribiendo de nuevo → retomamos el bot automáticamente. Si el último
+    // mensaje sigue siendo inbound (o un system ack de handoff), todavía estamos
+    // esperando al humano.
+    const recent = await listMessages(conversation.id, 2);
+    const previous = recent.length >= 2 ? recent[recent.length - 2] : null;
+    const alreadyReplied =
+      previous?.direction === 'outbound' &&
+      (previous.sender_type === 'human' || previous.sender_type === 'bot');
+
+    if (!alreadyReplied) {
+      sendAgentMessage({
+        from: 'whatsapp-bot',
+        to: 'broadcast',
+        topic: 'whatsapp.human_pending',
+        body: `Nuevo mensaje en conversación humana: ${input.profileName ?? input.waId}`,
+        payload: { conversationId: conversation.id },
+      });
+      return;
+    }
+
+    await setConversationMode(conversation.id, 'bot').catch(() => undefined);
+    pushLog({
+      level: 'info',
+      agentId: AGENT_LABEL,
+      message: `Bot retoma conversación · ${input.profileName ?? input.waId}`,
     });
-    return;
   }
 
   if (matchesHandoff(input.text)) {
@@ -164,13 +183,13 @@ export async function handleIncomingWhatsAppMessage(input: {
       message: `Fallo generando/enviando respuesta: ${message}`,
     });
 
-    // Si el bot falla, más vale pasar a un humano que dejar al cliente sin respuesta.
-    await setConversationMode(conversation.id, 'human').catch(() => undefined);
+    // No cambiamos a modo human — así el siguiente mensaje del cliente reintenta
+    // con el bot en lugar de quedar pegado esperando un humano que nunca llega.
     sendAgentMessage({
       from: 'whatsapp-bot',
       to: 'broadcast',
       topic: 'whatsapp.bot_error',
-      body: `Error respondiendo a ${input.profileName ?? input.waId}, pasa a humano`,
+      body: `Error respondiendo a ${input.profileName ?? input.waId}`,
       payload: { conversationId: conversation.id, error: message },
     });
   }
