@@ -54,14 +54,27 @@ NEW_COMMIT="$(git rev-parse --short HEAD)"
 log "Commit desplegado: ${NEW_COMMIT}"
 
 # ---------- Deps ----------
-log "npm ci --omit=dev"
-npm ci --omit=dev >> "${DEPLOY_LOG}" 2>&1 \
+# tsc vive en devDependencies, así que necesitamos instalar todo para buildear.
+# Después del build podamos las dev deps para no contaminar producción.
+log "npm ci (full, incluye devDependencies para tsc)"
+npm ci >> "${DEPLOY_LOG}" 2>&1 \
   || fail "npm ci falló. Revisa ${DEPLOY_LOG}."
+
+# Safety net: si tsc sigue sin estar, instalamos typescript global.
+if ! command -v npx >/dev/null 2>&1 || ! npx --no-install tsc --version >/dev/null 2>&1; then
+  log "WARN: tsc no quedó en node_modules/.bin — instalando typescript global"
+  npm install -g typescript >> "${DEPLOY_LOG}" 2>&1 \
+    || log "WARN: no se pudo instalar typescript global (continúa)"
+fi
 
 # ---------- Build ----------
 log "npm run build (tsc)"
 npm run build >> "${DEPLOY_LOG}" 2>&1 \
   || fail "tsc falló. Revisa ${DEPLOY_LOG}."
+
+# Ahora sí podemos podar dev deps (ya tenemos dist/)
+log "npm prune --omit=dev"
+npm prune --omit=dev >> "${DEPLOY_LOG}" 2>&1 || true
 
 # ---------- Migrate ----------
 if grep -q '"migrate"' package.json; then
