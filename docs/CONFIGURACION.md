@@ -170,18 +170,30 @@ POST /api/whatsapp/campaigns
 
 ## 8. Facebook Publisher + cola de aprobación
 
-Cockpit: **http://localhost:4100/facebook.html**
+Cockpit: **http://localhost:4100/facebook.html** (y prod: `https://growth.matubyte.com/facebook.html`)
 
 SQL: `sql/facebook_approval.sql` (o `npm run migrate`).
 
 ```env
 FB_PUBLISHER_ENABLED=true
-FB_DRY_RUN=true          # true hasta validar token
+FB_DRY_RUN=false         # false = publica de verdad
 FB_AUTO_PUBLISH=false    # false = tú apruebas; true = auto
 FB_PAGE_ID=106280654981120
 FB_PAGE_ACCESS_TOKEN=EAAxxxxx   # token de PÁGINA (me/accounts), no el de WhatsApp
 ```
 
-Flujo manual (recomendado): agente genera → `pending_review` → apruebas / editas / rechazas en el panel → publica.
+### Credenciales (si sale `#200 Permissions error`)
 
-Flujo auto: mismo agente publica al generar (respeta `FB_DRY_RUN`).
+1. [Graph API Explorer](https://developers.facebook.com/tools/explorer/)
+2. App correcta → **Agregar permiso** y marca:
+   - `pages_show_list`
+   - `pages_read_engagement`
+   - `pages_manage_posts` ← **obligatorio para publicar**
+   - `pages_manage_metadata` (recomendado)
+3. **Generar token de acceso** → en el diálogo elige la Página **MatuByte**
+4. Endpoint `me/accounts` → Enviar
+5. Copia el `access_token` del bloque `"name": "MatuByte"` → `FB_PAGE_ACCESS_TOKEN`
+6. El `id` → `FB_PAGE_ID`
+7. Actualiza `.env` en **local y en el VPS** (`growth.matubyte.com`) y reinicia el servicio
+
+Flujo manual: agente genera → `pending_review` → apruebas en el panel → publica.

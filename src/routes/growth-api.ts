@@ -24,10 +24,7 @@ import { env } from '../config/env.js';
 import {
   isFacebookConfigured,
   isFacebookDryRun,
-  publishDryRun,
-  publishFeedPost,
-  publishPhotoPost,
-  publishWithRetry,
+  publishRowMedia,
 } from '../facebook/client.js';
 import { fetchInternalSignals, fetchTrendingTopics } from '../facebook/trends.js';
 import type { AgentId } from '../agents/types.js';
@@ -320,29 +317,8 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
         error_message: null,
       });
 
-      const message = String(existing.script_body ?? '');
-      const photoUrl =
-        typeof existing.fb_photo_url === 'string' ? existing.fb_photo_url : null;
-
       try {
-        const result = await (async () => {
-          if (dryRun) {
-            return publishDryRun(photoUrl ? 'photos' : 'feed', {
-              message,
-              imageUrl: photoUrl ?? undefined,
-            });
-          }
-          if (photoUrl) {
-            return publishWithRetry(
-              () => publishPhotoPost(photoUrl, message),
-              'fb-photo-approve',
-            );
-          }
-          return publishWithRetry(
-            () => publishFeedPost(message),
-            'fb-feed-approve',
-          );
-        })();
+        const result = await publishRowMedia(existing, { dryRun });
 
         await updateContentScriptFb(request.params.id, {
           fb_post_id: result.fbPostId ?? undefined,
@@ -408,9 +384,15 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
         return reply.code(400).send({ error: 'El post no pertenece a Facebook' });
       }
       if (existing.publish_status === 'published') {
-        return reply
-          .code(409)
-          .send({ error: 'El post ya está publicado', post: existing });
+        const fake =
+          typeof existing.fb_post_id === 'string' &&
+          existing.fb_post_id.startsWith('fake_');
+        if (!fake) {
+          return reply
+            .code(409)
+            .send({ error: 'El post ya está publicado', post: existing });
+        }
+        // Era dry-run: permitir re-publicar en vivo
       }
 
       const forceDryRun = Boolean(request.body?.forceDryRun);
@@ -421,29 +403,15 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
           .send({ error: 'Facebook no configurado y dry-run desactivado' });
       }
 
-      const message = String(existing.script_body ?? '');
-      const photoUrl =
-        typeof existing.fb_photo_url === 'string' ? existing.fb_photo_url : null;
+      if (dryRun) {
+        return reply.code(409).send({
+          error:
+            'FB_DRY_RUN sigue activo. Pon FB_DRY_RUN=false en .env y reinicia el bot antes de RETRY LIVE.',
+        });
+      }
 
       try {
-        const result = await (async () => {
-          if (dryRun) {
-            return publishDryRun(photoUrl ? 'photos' : 'feed', {
-              message,
-              imageUrl: photoUrl ?? undefined,
-            });
-          }
-          if (photoUrl) {
-            return publishWithRetry(
-              () => publishPhotoPost(photoUrl, message),
-              'fb-photo-retry',
-            );
-          }
-          return publishWithRetry(
-            () => publishFeedPost(message),
-            'fb-feed-retry',
-          );
-        })();
+        const result = await publishRowMedia(existing, { dryRun: false });
 
         await updateContentScriptFb(request.params.id, {
           fb_post_id: result.fbPostId ?? undefined,
@@ -454,7 +422,7 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
         });
 
         const updated = await getContentScriptById(request.params.id);
-        return { ok: true, dryRun, post: updated };
+        return { ok: true, dryRun: false, post: updated };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         await updateContentScriptFb(request.params.id, {

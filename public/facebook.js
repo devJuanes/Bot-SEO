@@ -23,9 +23,25 @@ function esc(s) {
 function card(post, { editable = false } = {}) {
   const id = post.id;
   const status = post.publish_status || 'draft';
-  const photo = post.fb_photo_url
-    ? `<p class="fb-meta">🖼 ${esc(post.fb_photo_url)}</p>`
-    : '';
+  const meta =
+    post.metadata && typeof post.metadata === 'object' ? post.metadata : {};
+  const mediaType =
+    meta.media_type === 'video' ||
+    /\.(mp4|mov|webm)(\?|$)/i.test(String(post.fb_photo_url || ''))
+      ? 'video'
+      : post.fb_photo_url
+        ? 'image'
+        : 'none';
+  const thumb = meta.media_thumb || post.fb_photo_url;
+  const photo =
+    mediaType === 'video' && post.fb_photo_url
+      ? `<p class="fb-meta">🎬 VIDEO</p>
+         <video src="${esc(post.fb_photo_url)}" controls muted playsinline style="width:100%;max-height:220px;background:#000"></video>
+         ${thumb ? `<p class="fb-meta">thumb: ${esc(thumb)}</p>` : ''}`
+      : mediaType === 'image' && post.fb_photo_url
+        ? `<p class="fb-meta">🖼 IMAGE</p>
+           <img src="${esc(post.fb_photo_url)}" alt="" style="width:100%;max-height:220px;object-fit:cover;display:block" />`
+        : '';
   const seo = post.seo_title
     ? `<p class="fb-meta">SEO: ${esc(post.seo_title)}</p>`
     : '';
@@ -43,9 +59,13 @@ function card(post, { editable = false } = {}) {
         <button class="btn" data-act="approve" data-id="${esc(id)}">APROBAR + PUBLICAR</button>
         <button class="btn" data-act="reject" data-id="${esc(id)}">RECHAZAR</button>
         <button class="btn" data-act="save" data-id="${esc(id)}">GUARDAR TEXTO</button>
-        ${status === 'failed' ? `<button class="btn" data-act="retry" data-id="${esc(id)}">RETRY</button>` : ''}
+        ${status === 'failed' || String(post.fb_post_id || '').startsWith('fake_') ? `<button class="btn" data-act="retry" data-id="${esc(id)}">RETRY LIVE</button>` : ''}
       </div>`
-      : `<div class="fb-actions">${link}</div>`;
+      : `<div class="fb-actions">${link}${
+          String(post.fb_post_id || '').startsWith('fake_')
+            ? ` <button class="btn" data-act="retry" data-id="${esc(id)}">RETRY LIVE</button>`
+            : ''
+        }</div>`;
 
   const body = editable
     ? `<textarea class="fb-edit" id="body-${esc(id)}">${esc(post.script_body)}</textarea>`
@@ -70,12 +90,14 @@ async function loadConfig() {
   cfgPill.textContent = [
     cfg.enabled ? 'ON' : 'OFF',
     mode.toUpperCase(),
-    cfg.dryRun ? 'DRY' : 'LIVE',
+    cfg.dryRun ? '⚠ DRY (no sube)' : 'LIVE',
     cfg.configured ? 'TOKEN✓' : 'TOKEN✗',
   ].join(' · ');
-  cfgHint.textContent = cfg.configured
-    ? `Página ${cfg.pageId} · Graph ${cfg.graphVersion} · modo efectivo: ${mode}`
-    : 'Falta FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN en .env (puedes generar drafts en manual igual).';
+  cfgHint.textContent = cfg.dryRun
+    ? '⚠ FB_DRY_RUN=true (o el proceso no recargó .env). Pon FB_DRY_RUN=false, guarda, reinicia npm run dev. Los posts "fake_" NO están en Facebook.'
+    : cfg.configured
+      ? `LIVE · Página ${cfg.pageId} · Graph ${cfg.graphVersion} · modo: ${mode}`
+      : 'Falta FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN en .env.';
 }
 
 async function loadPosts() {
@@ -132,10 +154,21 @@ document.body.addEventListener('click', async (ev) => {
   const act = btn.getAttribute('data-act');
   try {
     if (act === 'approve') {
-      await api(`/api/facebook/posts/${id}/approve`, {
+      const out = await api(`/api/facebook/posts/${id}/approve`, {
         method: 'POST',
         body: JSON.stringify({ by: 'panel' }),
       });
+      if (out.dryRun || String(out.post?.fb_post_id || '').startsWith('fake_')) {
+        alert(
+          '⚠️ Se marcó publicado en DRY-RUN (no salió a Facebook).\n\nPon FB_DRY_RUN=false en .env, reinicia el bot, y usa RETRY en el post.',
+        );
+      } else {
+        alert(
+          out.post?.fb_permalink_url
+            ? `Publicado en Facebook:\n${out.post.fb_permalink_url}`
+            : 'Publicado en Facebook (revisa el muro de la Página).',
+        );
+      }
     } else if (act === 'reject') {
       const reason = prompt('Motivo del rechazo?', 'No encaja') || 'Rechazado';
       await api(`/api/facebook/posts/${id}/reject`, {

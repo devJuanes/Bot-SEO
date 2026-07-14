@@ -12,10 +12,7 @@ import { chatCompletion, isLlmConfigured } from '../llm/client.js';
 import {
   isFacebookConfigured,
   isFacebookDryRun,
-  publishDryRun,
-  publishFeedPost,
-  publishPhotoPost,
-  publishWithRetry,
+  publishRowMedia,
 } from '../facebook/client.js';
 import {
   fetchTrendingTopics,
@@ -23,7 +20,8 @@ import {
 } from '../facebook/trends.js';
 import { pushLog, sendAgentMessage } from '../runtime/state.js';
 import type { Agent, AgentContext, AgentResult } from './types.js';
-import { pickCoverImage } from '../knowledge/blog-images.js';
+import { pickFacebookImage } from '../knowledge/blog-images.js';
+import { resolveFacebookMedia } from '../facebook/images.js';
 import { env } from '../config/env.js';
 
 function slugify(value: string): string {
@@ -167,16 +165,7 @@ export const facebookPublisherAgent: Agent = {
         };
       }
 
-      // 3. Imagen pública opcional
-      const imageUrl =
-        (isValidUrl(opts.imageUrl) ? opts.imageUrl : null) ??
-        pickCoverImage({
-          sector: 'redes sociales',
-          keywords: [trend.title],
-          title: trend.title,
-        }).url;
-
-      // 4. App foco (primer app_connections activo o appSlug explícito)
+      // 3. App foco (primer app_connections activo o appSlug explícito)
       const app = opts.appSlug
         ? await getAppBySlug(opts.appSlug).catch(() => null)
         : (await listAppConnections().catch(() => []))[0] ?? null;
@@ -184,12 +173,12 @@ export const facebookPublisherAgent: Agent = {
         ? `App foco: ${app.name} (${app.app_url ?? 'N/A'})\nBrand voice: ${app.brand_voice ?? 'técnico cercano'}\nDescription: ${app.description ?? ''}`
         : 'App foco: (sin app_connections registradas)';
 
-      // 5. Signals internas + knowledge
+      // 4. Signals internas + knowledge
       const { fetchInternalSignals } = await import('../facebook/trends.js');
       const internalSignals = await fetchInternalSignals().catch(() => '');
       const knowledge = await buildKnowledgeContext().catch(() => '');
 
-      // 6. Prompt
+      // 5. Prompt (sin forzar una image_url fija)
       const completion = await chatCompletion({
         temperature: 0.85,
         maxTokens: 1200,
@@ -209,12 +198,19 @@ Reglas:
 - CTA suave con matubyte.com
 - 4–6 hashtags mixtos (marca + nicho + geo suave).
 - seo_title ≤60 chars; seo_keywords 3–6 términos de búsqueda.
+- image_themes: 3–5 palabras/frases para buscar stock (foto o video). En inglés conviene.
+- media_type: "image" | "video" | "auto"
+  - usa "video" si el tema se presta a movimiento (demo, automatización, IA, procesos)
+  - "image" si es más estático (CRM, cotización, tip)
+  - "auto" si no estás seguro
+- NO inventes URLs de media.
 - Devuelve SOLO JSON:
   {
     "hook": "...",
     "message": "...",
     "hashtags": ["#uno"],
-    "image_url": "",
+    "image_themes": ["crm", "sales team", "laptop office"],
+    "media_type": "auto",
     "topic": "tema corto",
     "seo_title": "...",
     "seo_keywords": ["software a medida", "PYMES Colombia"]
@@ -238,10 +234,6 @@ ${internalSignals.slice(0, 3500)}
 Knowledge empresa:
 ${knowledge.slice(0, 5000)}
 
-¿Hay imageUrl sugerida? ${
-              isValidUrl(imageUrl) ? `Sí: ${imageUrl}. Devuélvela en image_url.` : 'No. Devuelve image_url vacío (post solo texto).'
-            }
-
 Devuelve SOLO JSON.`,
           },
         ],
@@ -249,7 +241,14 @@ Devuelve SOLO JSON.`,
 
       const parsed = extractJson(completion.content);
       const hook = String(parsed.hook ?? '').trim();
-      const message = String(parsed.message ?? completion.content).trim();
+      let message = String(parsed.message ?? completion.content).trim();
+      // Si el LLM devolvió JSON crudo como cuerpo, intenta recuperar message
+      if (message.startsWith('```') || message.trimStart().startsWith('{')) {
+        const inner = extractJson(message);
+        if (typeof inner.message === 'string' && inner.message.trim()) {
+          message = String(inner.message).trim();
+        }
+      }
       const topic = String(parsed.topic ?? trend.title).trim();
       const hashtags = Array.isArray(parsed.hashtags)
         ? (parsed.hashtags as unknown[]).map(String).filter(Boolean)
@@ -258,8 +257,36 @@ Devuelve SOLO JSON.`,
       const seoKeywords = Array.isArray(parsed.seo_keywords)
         ? (parsed.seo_keywords as unknown[]).map(String).filter(Boolean)
         : [];
-      const llmImageUrl = isValidUrl(parsed.image_url) ? parsed.image_url : null;
-      const finalPhotoUrl = llmImageUrl ?? (isValidUrl(imageUrl) ? imageUrl : null);
+      const imageThemes = Array.isArray(parsed.image_themes)
+        ? (parsed.image_themes as unknown[]).map(String).filter(Boolean)
+        : seoKeywords;
+      const mediaPreferRaw = String(parsed.media_type ?? 'auto')
+        .trim()
+        .toLowerCase();
+      const mediaPrefer =
+        mediaPreferRaw === 'video' || mediaPreferRaw === 'image'
+          ? mediaPreferRaw
+          : ('auto' as const);
+
+      // 6. Media alineada al copy: foto o video (Pexels) / fallback imagen local
+      const fallbackImage = isValidUrl(opts.imageUrl)
+        ? opts.imageUrl
+        : pickFacebookImage({
+            topic,
+            hook,
+            message,
+            hashtags,
+            imageThemes,
+            trendTitle: trend.title,
+          }).url;
+
+      const media = await resolveFacebookMedia({
+        prefer: mediaPrefer,
+        themes: imageThemes,
+        topic,
+        seed: `${topic}|${trend.url}`,
+        fallbackImageUrl: fallbackImage,
+      });
 
       // 7. INSERT — pending_review si manual; draft+publish si auto
       const initialStatus = autoPublish ? 'draft' : 'pending_review';
@@ -271,7 +298,8 @@ Devuelve SOLO JSON.`,
         hashtags,
         seo_title: seoTitle,
         seo_keywords: seoKeywords,
-        fb_photo_url: finalPhotoUrl,
+        // Guardamos URL principal aquí (foto o mp4); el tipo va en metadata
+        fb_photo_url: media.url,
         trend_source: trend.source,
         trend_url: trend.url,
         publish_status: initialStatus,
@@ -282,6 +310,9 @@ Devuelve SOLO JSON.`,
           usage: completion.usage ?? null,
           generated_by: 'facebook-publisher',
           approval_mode: autoPublish ? 'auto' : 'manual',
+          media_type: media.mediaType,
+          media_thumb: media.thumbUrl ?? null,
+          image_themes: imageThemes,
         },
       });
 
@@ -336,22 +367,16 @@ Devuelve SOLO JSON.`,
       });
 
       // 8. Publicar (modo auto)
-      const publish = async () => {
-        if (dryRun) {
-          return publishDryRun(finalPhotoUrl ? 'photos' : 'feed', {
-            message,
-            imageUrl: finalPhotoUrl ?? undefined,
-          });
-        }
-        if (finalPhotoUrl) {
-          return publishWithRetry(() => publishPhotoPost(finalPhotoUrl, message), 'fb-photo');
-        }
-        return publishWithRetry(() => publishFeedPost(message), 'fb-feed');
-      };
-
       let publishResult;
       try {
-        publishResult = await publish();
+        publishResult = await publishRowMedia(
+          {
+            script_body: message,
+            fb_photo_url: media.url,
+            metadata: { media_type: media.mediaType },
+          },
+          { dryRun },
+        );
       } catch (publishErr) {
         const errorMsg =
           publishErr instanceof Error ? publishErr.message : String(publishErr);
@@ -406,7 +431,9 @@ Devuelve SOLO JSON.`,
           fb_post_id: publishResult.fbPostId ?? undefined,
           fb_permalink_url: publishResult.fbPermalinkUrl ?? undefined,
           dryRun,
-          withPhoto: Boolean(finalPhotoUrl),
+          withPhoto: media.mediaType === 'image',
+          withVideo: media.mediaType === 'video',
+          mediaType: media.mediaType,
         },
       };
 
