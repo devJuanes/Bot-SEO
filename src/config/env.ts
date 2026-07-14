@@ -73,9 +73,16 @@ const envSchema = z.object({
   // Documentación: https://developers.facebook.com/docs/pages-api
   FB_PUBLISHER_ENABLED: booleanFromEnv,
   FB_DRY_RUN: booleanFromEnv,
+  /** true = publica al generar; false = deja pending_review para /facebook.html */
+  FB_AUTO_PUBLISH: booleanFromEnv,
   FB_PAGE_ID: z.string().optional().or(z.literal('')),
   FB_PAGE_ACCESS_TOKEN: z.string().optional().or(z.literal('')),
   FB_GRAPH_VERSION: z.string().min(1).default('v21.0'),
+
+  // Facebook Webhooks — recibe eventos de la página (comentarios, reactions,
+  // feed, leadgen, messenger). Requiere URL HTTPS pública (usa ngrok en dev).
+  FB_WEBHOOK_ENABLED: booleanFromEnv,
+  FB_WEBHOOK_VERIFY_TOKEN: z.string().min(1).default('matubyte_fb_verify_token'),
 
   LEAD_HUNTER_CITY: z.string().min(1).default('Cali'),
   LEAD_HUNTER_SECTOR: z.string().optional().or(z.literal('')),

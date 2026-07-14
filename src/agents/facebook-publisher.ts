@@ -1,6 +1,7 @@
 import {
   buildKnowledgeContext,
   getAppBySlug,
+  getFacebookPublisherSettings,
   insertContentScript,
   listAppConnections,
   listRecentTrendUrls,
@@ -23,6 +24,7 @@ import {
 import { pushLog, sendAgentMessage } from '../runtime/state.js';
 import type { Agent, AgentContext, AgentResult } from './types.js';
 import { pickCoverImage } from '../knowledge/blog-images.js';
+import { env } from '../config/env.js';
 
 function slugify(value: string): string {
   return value
@@ -64,6 +66,8 @@ export interface FacebookPublisherOptions {
   trendSource?: 'reddit' | 'news';
   imageUrl?: string;
   forceDryRun?: boolean;
+  /** Fuerza publicación inmediata saltando la cola (solo si FB está OK). */
+  forceAutoPublish?: boolean;
   appSlug?: string;
 }
 
@@ -87,7 +91,7 @@ export const facebookPublisherAgent: Agent = {
   id: 'facebook-publisher',
   name: 'Agente Facebook Publisher',
   description:
-    'Detecta tendencias (Reddit/Google News/llamadas internas), genera post y publica directo en página de Facebook vía Meta Graph.',
+    'Detecta tendencias, genera post SEO para Facebook y lo deja en cola de aprobación (manual) o publica (auto).',
   async run(ctx: AgentContext): Promise<AgentResult> {
     const startedAt = new Date().toISOString();
 
@@ -107,11 +111,22 @@ export const facebookPublisherAgent: Agent = {
 
     const opts = (ctx.params ?? {}) as FacebookPublisherOptions;
     const dryRun = opts.forceDryRun ?? isFacebookDryRun();
+    const fbSettings = await getFacebookPublisherSettings().catch(() => ({
+      mode: 'manual' as const,
+      auto_publish: false,
+    }));
+    const autoPublish =
+      opts.forceAutoPublish === true ||
+      (opts.forceAutoPublish !== false &&
+        (env.FB_AUTO_PUBLISH === true ||
+          fbSettings.auto_publish === true ||
+          fbSettings.mode === 'auto'));
 
-    if (!dryRun && !isFacebookConfigured()) {
+    if (autoPublish && !dryRun && !isFacebookConfigured()) {
       return {
         status: 'error',
-        reason: 'Facebook no configurado: define FB_PAGE_ID y FB_PAGE_ACCESS_TOKEN en .env o usa FB_DRY_RUN=true.',
+        reason:
+          'Facebook no configurado: define FB_PAGE_ID y FB_PAGE_ACCESS_TOKEN en .env o usa FB_DRY_RUN=true / modo manual.',
       };
     }
 
@@ -119,10 +134,12 @@ export const facebookPublisherAgent: Agent = {
       pushLog({
         level: 'info',
         agentId: this.id,
-        message: dryRun
-          ? 'FB Publisher en modo DRY-RUN (no publica de verdad)'
-          : 'FB Publisher publicará en la página real de Facebook',
-        details: { dryRun },
+        message: autoPublish
+          ? dryRun
+            ? 'FB Publisher AUTO + DRY-RUN'
+            : 'FB Publisher AUTO — publicará en Facebook'
+          : 'FB Publisher MANUAL — generará draft en cola /facebook.html',
+        details: { dryRun, autoPublish, mode: fbSettings.mode },
       });
 
       // 1. Tendencias externas (Reddit + Google News)
@@ -179,20 +196,30 @@ export const facebookPublisherAgent: Agent = {
         messages: [
           {
             role: 'system',
-            content: `Eres social media manager de MatuByte S.A.S. (Cali, Colombia).
-MatuByte crea software a medida, apps web/móvil, CRM, automatizaciones y herramientas SEO para PYMES colombianas y LatAm.
+            content: `Eres social media manager SEO de MatuByte S.A.S. (Cali, Colombia · alcance global).
+MatuByte crea software a medida, apps web/móvil, CRM, automatizaciones y herramientas SEO.
 
-Tu trabajo: convertir UNA tendencia detectada en un post de Facebook listo para publicar.
+Tu trabajo: convertir UNA tendencia en un post de Facebook listo para aprobar/publicar, optimizado para alcance orgánico y marca.
 
 Reglas:
-- Escribe en español colombiano natural, sin emojis excesivos (máx 2 bien puestos).
-- Hook en la primera línea (≤90 caracteres, gancho real, no clickbait).
-- Cuerpo: 2-4 párrafos cortos, conecta la tendencia con un dolor real de PYMES y deja una puerta abierta a MatuByte (sin vender agresivo).
-- CTA suave al final (ej: "Conversemos → matubyte.com" o "Te leemos en comentarios").
-- 3 a 5 hashtags en español, relevantes al tema.
-- Devuelve SOLO JSON válido con esta forma exacta:
-  { "hook": "...", "message": "...", "hashtags": ["#uno"], "image_url": "", "topic": "tema corto" }
-- "message" = texto completo del post (incluye hook al inicio y CTA al final).`,
+- Español claro (Colombia), tono experto cercano. Máx 2 emojis.
+- Hook ≤90 caracteres con keyword natural (software, automatización, CRM, IA, etc. cuando encaje).
+- Cuerpo 2-4 párrafos cortos: dolor PYME → insight → MatuByte sin hard-sell.
+- Incluye 1 pregunta que invite comentario (algoritmo FB).
+- CTA suave con matubyte.com
+- 4–6 hashtags mixtos (marca + nicho + geo suave).
+- seo_title ≤60 chars; seo_keywords 3–6 términos de búsqueda.
+- Devuelve SOLO JSON:
+  {
+    "hook": "...",
+    "message": "...",
+    "hashtags": ["#uno"],
+    "image_url": "",
+    "topic": "tema corto",
+    "seo_title": "...",
+    "seo_keywords": ["software a medida", "PYMES Colombia"]
+  }
+- "message" = post completo (hook + cuerpo + CTA + hashtags al final).`,
           },
           {
             role: 'user',
@@ -227,26 +254,34 @@ Devuelve SOLO JSON.`,
       const hashtags = Array.isArray(parsed.hashtags)
         ? (parsed.hashtags as unknown[]).map(String).filter(Boolean)
         : [];
+      const seoTitle = String(parsed.seo_title ?? topic).trim().slice(0, 200);
+      const seoKeywords = Array.isArray(parsed.seo_keywords)
+        ? (parsed.seo_keywords as unknown[]).map(String).filter(Boolean)
+        : [];
       const llmImageUrl = isValidUrl(parsed.image_url) ? parsed.image_url : null;
       const finalPhotoUrl = llmImageUrl ?? (isValidUrl(imageUrl) ? imageUrl : null);
 
-      // 7. INSERT draft
+      // 7. INSERT — pending_review si manual; draft+publish si auto
+      const initialStatus = autoPublish ? 'draft' : 'pending_review';
       const rowId = await insertContentScript({
         platform: 'facebook',
         topic,
         hook,
         script_body: message,
         hashtags,
+        seo_title: seoTitle,
+        seo_keywords: seoKeywords,
         fb_photo_url: finalPhotoUrl,
         trend_source: trend.source,
         trend_url: trend.url,
-        publish_status: 'draft',
+        publish_status: initialStatus,
         metadata: {
           app_slug: app?.slug ?? null,
           trend_summary: trend.summary ?? null,
           model: completion.model,
           usage: completion.usage ?? null,
           generated_by: 'facebook-publisher',
+          approval_mode: autoPublish ? 'auto' : 'manual',
         },
       });
 
@@ -254,11 +289,43 @@ Devuelve SOLO JSON.`,
         pushLog({
           level: 'warn',
           agentId: this.id,
-          message: 'INSERT content_script no devolvió id; se aborta publish',
+          message: 'INSERT content_script no devolvió id; se aborta',
         });
         return {
           status: 'error',
           reason: 'No se pudo persistir el draft (INSERT devolvió vacío)',
+        };
+      }
+
+      // Manual: cola de aprobación — no publica
+      if (!autoPublish) {
+        sendAgentMessage({
+          from: 'facebook-publisher',
+          to: 'broadcast',
+          topic: 'facebook.pending_review',
+          body: `Post listo para aprobar: ${topic}`,
+          payload: { rowId, topic, trend: trend.title },
+        });
+
+        await logAgentRun({
+          agent_id: this.id,
+          triggered_by: ctx.triggeredBy,
+          status: 'ok',
+          reason: `Draft en cola pending_review: "${topic}"`,
+          details: { rowId, topic: slugify(topic), autoPublish: false },
+          started_at: startedAt,
+        }).catch(() => undefined);
+
+        return {
+          status: 'ok',
+          reason: `Post en cola de aprobación (/facebook.html): "${topic}"`,
+          details: {
+            rowId,
+            topic: slugify(topic),
+            trend: trend.title,
+            publish_status: 'pending_review',
+            autoPublish: false,
+          },
         };
       }
 
@@ -268,7 +335,7 @@ Devuelve SOLO JSON.`,
         message: `Draft FB guardado (row=${rowId}), intentando publicar…`,
       });
 
-      // 8. Publicar
+      // 8. Publicar (modo auto)
       const publish = async () => {
         if (dryRun) {
           return publishDryRun(finalPhotoUrl ? 'photos' : 'feed', {

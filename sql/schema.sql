@@ -349,3 +349,31 @@ CREATE INDEX IF NOT EXISTS idx_content_scripts_platform_published
   ON content_scripts(platform, fb_published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_content_scripts_trend_url
   ON content_scripts(trend_url);
+
+-- Facebook approval queue + bot settings
+CREATE TABLE IF NOT EXISTS bot_settings (
+  key VARCHAR(100) PRIMARY KEY,
+  value JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO bot_settings (key, value)
+VALUES (
+  'facebook_publisher',
+  jsonb_build_object(
+    'mode', 'manual',
+    'auto_publish', false,
+    'default_hashtags', jsonb_build_array('#MatuByte', '#Software', '#Colombia'),
+    'notes', 'manual = requiere Aprobar en /facebook.html; auto = publica al generar'
+  )
+)
+ON CONFLICT (key) DO NOTHING;
+
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS approved_by VARCHAR(80);
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS rejected_reason TEXT;
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS seo_title VARCHAR(200);
+ALTER TABLE content_scripts ADD COLUMN IF NOT EXISTS seo_keywords TEXT[];
+
+CREATE INDEX IF NOT EXISTS idx_content_scripts_pending_fb
+  ON content_scripts (platform, publish_status, created_at DESC);

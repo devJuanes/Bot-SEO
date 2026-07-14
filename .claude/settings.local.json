@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ssh -V)",
+      "Read(//c/Users/juanl/.ssh/**)",
+      "Bash(mkdir -p /c/Users/juanl/deploy-botseo)",
+      "Read(//c/Users/juanl/**)",
+      "Bash(npm init:*)",
+      "Bash(node scp-put.mjs --key /c/Users/juanl/.ssh/botseo_vps --local \"C:/MatuStudio/Bot SEO/.env\" --remote /root/apps/Bot-SEO/.env --mode 0600)",
+      "Bash(node ssh-write-remote.mjs --key /c/Users/juanl/.ssh/botseo_vps --local \"C:/MatuStudio/Bot SEO/.env\" --remote /root/apps/Bot-SEO/.env --mode 0600)"
+    ]
+  }
+}

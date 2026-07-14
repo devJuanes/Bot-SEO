@@ -119,13 +119,19 @@ Usa la URL `https://xxxx.ngrok-free.app/webhooks/whatsapp` como callback.
 
 ```env
 WHATSAPP_ENABLED=true
-WHATSAPP_ACCESS_TOKEN=EAAxxxxx...
+WHATSAPP_ACCESS_TOKEN=EAAxxxxx...   # System User PERMANENTE (no token de prueba 24h)
 WHATSAPP_PHONE_NUMBER_ID=123456789012345
 WHATSAPP_BUSINESS_ACCOUNT_ID=123456789012345
 WHATSAPP_VERIFY_TOKEN=elige-un-string-secreto
 META_APP_SECRET=xxxxxxxxxxxxxxxx
 WHATSAPP_HANDOFF_KEYWORDS=hablar con alguien,agente humano,asesor
 ```
+
+**Si ves `WhatsApp API error (401): Authentication Error`:**
+1. El token expiró o no es de WhatsApp (no uses el de Página Facebook).
+2. Meta Business Manager → Usuarios del sistema → token con `whatsapp_business_messaging` + `whatsapp_business_management`.
+3. Pega en `WHATSAPP_ACCESS_TOKEN` y **reinicia el bot**.
+4. Comprueba: `GET http://localhost:4100/api/whatsapp/diagnostics` → `"ok": true`.
 
 ### 7.4 Cómo funciona
 
@@ -161,3 +167,21 @@ POST /api/whatsapp/campaigns
   "leadFilter": { "sector": "peluquerias", "city": "Cali" }
 }
 ```
+
+## 8. Facebook Publisher + cola de aprobación
+
+Cockpit: **http://localhost:4100/facebook.html**
+
+SQL: `sql/facebook_approval.sql` (o `npm run migrate`).
+
+```env
+FB_PUBLISHER_ENABLED=true
+FB_DRY_RUN=true          # true hasta validar token
+FB_AUTO_PUBLISH=false    # false = tú apruebas; true = auto
+FB_PAGE_ID=106280654981120
+FB_PAGE_ACCESS_TOKEN=EAAxxxxx   # token de PÁGINA (me/accounts), no el de WhatsApp
+```
+
+Flujo manual (recomendado): agente genera → `pending_review` → apruebas / editas / rechazas en el panel → publica.
+
+Flujo auto: mismo agente publica al generar (respeta `FB_DRY_RUN`).

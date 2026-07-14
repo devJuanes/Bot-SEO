@@ -414,7 +414,9 @@ export async function insertContentScript(input: {
   fb_photo_url?: string | null;
   trend_source?: string | null;
   trend_url?: string | null;
-  publish_status?: 'draft' | 'published' | 'failed' | 'skipped';
+  publish_status?: 'draft' | 'pending_review' | 'approved' | 'published' | 'failed' | 'skipped';
+  seo_title?: string | null;
+  seo_keywords?: string[];
 }): Promise<string | null> {
   const { data, error } = await withRetry<{ error: unknown; data: unknown }>(() =>
     db.from('content_scripts').insert({
@@ -423,6 +425,8 @@ export async function insertContentScript(input: {
       hook: input.hook ?? null,
       script_body: input.script_body,
       seo_copy: input.seo_copy ?? null,
+      seo_title: input.seo_title ?? null,
+      seo_keywords: input.seo_keywords ?? [],
       hashtags: input.hashtags ?? [],
       status: 'draft',
       metadata: input.metadata ?? {},
@@ -445,8 +449,24 @@ export interface FbPublishPatch {
   fb_post_id?: string;
   fb_permalink_url?: string;
   fb_published_at?: string;
-  publish_status?: 'draft' | 'published' | 'failed' | 'skipped';
+  publish_status?:
+    | 'draft'
+    | 'pending_review'
+    | 'approved'
+    | 'published'
+    | 'failed'
+    | 'skipped';
   error_message?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_reason?: string | null;
+  script_body?: string;
+  hook?: string;
+  topic?: string;
+  hashtags?: string[];
+  fb_photo_url?: string | null;
+  seo_title?: string | null;
+  seo_keywords?: string[];
 }
 
 export async function updateContentScriptFb(
@@ -459,10 +479,104 @@ export async function updateContentScriptFb(
   if (patch.fb_published_at !== undefined) clean.fb_published_at = patch.fb_published_at;
   if (patch.publish_status !== undefined) clean.publish_status = patch.publish_status;
   if (patch.error_message !== undefined) clean.error_message = patch.error_message;
+  if (patch.approved_at !== undefined) clean.approved_at = patch.approved_at;
+  if (patch.approved_by !== undefined) clean.approved_by = patch.approved_by;
+  if (patch.rejected_reason !== undefined) clean.rejected_reason = patch.rejected_reason;
+  if (patch.script_body !== undefined) clean.script_body = patch.script_body;
+  if (patch.hook !== undefined) clean.hook = patch.hook;
+  if (patch.topic !== undefined) clean.topic = patch.topic;
+  if (patch.hashtags !== undefined) clean.hashtags = patch.hashtags;
+  if (patch.fb_photo_url !== undefined) clean.fb_photo_url = patch.fb_photo_url;
+  if (patch.seo_title !== undefined) clean.seo_title = patch.seo_title;
+  if (patch.seo_keywords !== undefined) clean.seo_keywords = patch.seo_keywords;
   clean.updated_at = new Date().toISOString();
 
   const { error } = await db.from('content_scripts').eq('id', id).update(clean);
   if (error) throw new Error(`updateContentScriptFb: ${errMsg(error)}`);
+}
+
+export type FacebookPublisherSettings = {
+  mode: 'manual' | 'auto';
+  auto_publish: boolean;
+  default_hashtags?: string[];
+  notes?: string;
+};
+
+const DEFAULT_FB_SETTINGS: FacebookPublisherSettings = {
+  mode: 'manual',
+  auto_publish: false,
+  default_hashtags: ['#MatuByte', '#Software', '#Colombia'],
+};
+
+export async function getBotSetting<T = Record<string, unknown>>(
+  key: string,
+): Promise<T | null> {
+  const { data, error } = await db
+    .from('bot_settings')
+    .select('value')
+    .eq('key', key)
+    .limit(1);
+  if (error) throw new Error(`getBotSetting: ${errMsg(error)}`);
+  const row = (data ?? [])[0] as { value?: T } | undefined;
+  return row?.value ?? null;
+}
+
+export async function upsertBotSetting(
+  key: string,
+  value: Record<string, unknown>,
+): Promise<void> {
+  const existing = await db
+    .from('bot_settings')
+    .select('key')
+    .eq('key', key)
+    .limit(1);
+  if (existing.error) throw new Error(`upsertBotSetting find: ${errMsg(existing.error)}`);
+  const row = (existing.data ?? [])[0];
+  if (row) {
+    const { error } = await db
+      .from('bot_settings')
+      .eq('key', key)
+      .update({ value, updated_at: new Date().toISOString() });
+    if (error) throw new Error(`upsertBotSetting update: ${errMsg(error)}`);
+    return;
+  }
+  const { error } = await db.from('bot_settings').insert({
+    key,
+    value,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw new Error(`upsertBotSetting insert: ${errMsg(error)}`);
+}
+
+export async function getFacebookPublisherSettings(): Promise<FacebookPublisherSettings> {
+  const stored = await getBotSetting<Partial<FacebookPublisherSettings>>(
+    'facebook_publisher',
+  ).catch(() => null);
+  return {
+    ...DEFAULT_FB_SETTINGS,
+    ...stored,
+    mode: stored?.mode === 'auto' ? 'auto' : 'manual',
+    auto_publish: Boolean(stored?.auto_publish),
+  };
+}
+
+export async function listFacebookPosts(opts?: {
+  status?: string;
+  limit?: number;
+}): Promise<Record<string, unknown>[]> {
+  const limit = Math.min(100, Math.max(1, opts?.limit ?? 30));
+  let q = db
+    .from('content_scripts')
+    .select('*')
+    .eq('platform', 'facebook')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (opts?.status) {
+    q = q.eq('publish_status', opts.status);
+  }
+  const { data, error } = await q;
+  if (error) throw new Error(`listFacebookPosts: ${errMsg(error)}`);
+  return (data ?? []) as Record<string, unknown>[];
 }
 
 /**

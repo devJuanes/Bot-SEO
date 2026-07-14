@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Facebook Queue // MatuByte</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Press+Start+2P&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .fb-card {
+        border: 2px solid var(--cyan);
+        padding: 0.85rem;
+        margin-bottom: 0.75rem;
+        background: #05040f;
+      }
+      .fb-card h3 {
+        font-family: Orbitron, sans-serif;
+        font-size: 0.85rem;
+        margin: 0 0 0.35rem;
+      }
+      .fb-meta {
+        font-family: VT323, monospace;
+        font-size: 1.05rem;
+        color: #9ff;
+        margin-bottom: 0.5rem;
+      }
+      .fb-body {
+        white-space: pre-wrap;
+        font-family: VT323, monospace;
+        font-size: 1.15rem;
+        line-height: 1.35;
+        margin: 0.5rem 0;
+        max-height: 220px;
+        overflow: auto;
+      }
+      .fb-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.45rem;
+        margin-top: 0.6rem;
+      }
+      textarea.fb-edit {
+        width: 100%;
+        min-height: 120px;
+        background: #05040f;
+        border: 2px solid var(--cyan);
+        color: #fff;
+        font-family: VT323, monospace;
+        font-size: 1.15rem;
+        padding: 0.5rem;
+      }
+      .mode-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stars" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <header class="topbar chrome">
+      <div class="brand">
+        <a class="pixel" href="/" style="text-decoration:none;color:inherit">← COCKPIT</a>
+        <span class="orbit">FACEBOOK QUEUE</span>
+      </div>
+      <div class="status-pills">
+        <span id="cfgPill" class="pill">--</span>
+        <button id="generateBtn" class="btn">GENERAR POST</button>
+        <button id="refreshBtn" class="btn">REFRESH</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel chrome">
+        <div class="section-head"><h2>⚙ MODO PUBLICACIÓN</h2></div>
+        <div class="mode-row">
+          <label>
+            <input type="radio" name="mode" value="manual" />
+            Manual (yo apruebo en esta cola)
+          </label>
+          <label>
+            <input type="radio" name="mode" value="auto" />
+            Auto (publica solo al generar)
+          </label>
+          <button id="saveModeBtn" class="btn">GUARDAR MODO</button>
+        </div>
+        <p class="hint" id="cfgHint">
+          FB_PAGE_ID + FB_PAGE_ACCESS_TOKEN en .env. Con FB_DRY_RUN=true no publica de verdad.
+        </p>
+      </section>
+
+      <section class="split">
+        <div class="panel chrome">
+          <div class="section-head"><h2>◈ PENDIENTES</h2></div>
+          <div id="pendingList"></div>
+        </div>
+        <div class="panel chrome">
+          <div class="section-head"><h2>⚡ RECIENTES</h2></div>
+          <div id="recentList"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      MatuByte S.A.S. · Facebook Pages API · sql/facebook_approval.sql
+    </footer>
+
+    <script src="/facebook.js" type="module"></script>
+  </body>
+</html>

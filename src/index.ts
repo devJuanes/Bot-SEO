@@ -10,6 +10,7 @@ import { dashboardRoutes } from './routes/dashboard.js';
 import { growthApiRoutes } from './routes/growth-api.js';
 import { whatsappWebhookRoutes } from './routes/whatsapp-webhook.js';
 import { whatsappApiRoutes } from './routes/whatsapp-api.js';
+import { facebookWebhookRoutes } from './routes/facebook-webhook.js';
 import { startScheduler, stopScheduler } from './jobs/scheduler.js';
 import {
   bootstrapRuntime,
@@ -57,6 +58,19 @@ async function main(): Promise<void> {
   await app.register(growthApiRoutes);
   await app.register(whatsappWebhookRoutes);
   await app.register(whatsappApiRoutes);
+
+  if (env.FB_WEBHOOK_ENABLED) {
+    await app.register(facebookWebhookRoutes);
+    if (!env.META_APP_SECRET) {
+      app.log.warn(
+        'FB_WEBHOOK_ENABLED=true pero META_APP_SECRET no está seteado — las firmas de Meta NO se verificarán (acepta cualquier request).',
+      );
+    } else {
+      app.log.info(
+        `Webhook FB activo en /webhooks/facebook · verify_token=${env.FB_WEBHOOK_VERIFY_TOKEN}`,
+      );
+    }
+  }
   await app.register(rootRoutes);
   await app.register(healthRoutes);
   await app.register(agentRoutes);

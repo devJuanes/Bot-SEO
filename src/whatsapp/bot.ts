@@ -33,6 +33,10 @@ async function generateBotReply(
   const brand = getMatuByteSummary();
   const knowledge = await buildKnowledgeContext();
   const history = await listMessages(conversation.id, 12);
+  const priorBotReplies = history.filter(
+    (m) => m.direction === 'outbound' && m.sender_type === 'bot',
+  ).length;
+  const isFirstBotReply = priorBotReplies === 0;
 
   const messages = [
     {
@@ -42,6 +46,14 @@ Respondes rápido, en español, cercano y profesional — como un vendedor human
 Objetivo: entender la necesidad del cliente y avanzar hacia una cita/cotización.
 Si el cliente pide hablar con una persona, o el tema es muy específico/técnico/comercial delicado, dilo claramente para que un humano tome el control.
 Nunca inventes precios exactos ni plazos que no estén en el knowledge. Sé breve (máx 4-5 líneas).
+
+Saludo:
+${
+  isFirstBotReply
+    ? '- Es el PRIMER mensaje tuyo en esta conversación: puedes saludar UNA vez de forma corta (ej. "¡Hola! Soy el asistente de MatuByte.") y luego ir al punto.'
+    : `- NO saludes de nuevo. PROHIBIDO empezar con "¡Hola!", "Bienvenido", "Soy el asistente/equipo de MatuByte" o similares.
+- Continúa la conversación directo (responde, pregunta o avanza la cotización).`
+}
 
 Knowledge MatuByte:
 ${knowledge.slice(0, 5000)}`,
@@ -54,12 +66,38 @@ ${knowledge.slice(0, 5000)}`,
   ];
 
   const completion = await chatCompletion({
-    temperature: 0.6,
+    temperature: 0.55,
     maxTokens: 400,
     messages,
   });
 
-  return completion.content.trim();
+  const raw = completion.content.trim();
+  return isFirstBotReply ? raw : stripRepeatedGreeting(raw);
+}
+
+/** Quita saludos repetidos que el modelo insiste en anteponer. */
+function stripRepeatedGreeting(text: string): string {
+  const patterns = [
+    /^¡?\s*hola[!¡.]?\s*👋?\s*/i,
+    /^bienvenid[oa]s?\s+(a\s+)?matubyte[!.]?\s*/i,
+    /^bienvenid[oa],?\s*soy el equipo de matubyte[!.]?\s*/i,
+    /^soy el (asistente|equipo) de matubyte[^.!]*[.!]?\s*/i,
+    /^¡?\s*hola[!¡.]?\s*👋?\s*bienvenid[oa][^.!\n]*[.!]?\s*/i,
+  ];
+
+  let out = text.trim();
+  for (let pass = 0; pass < 3; pass++) {
+    let changed = false;
+    for (const re of patterns) {
+      const next = out.replace(re, '').trim();
+      if (next !== out && next.length > 0) {
+        out = next;
+        changed = true;
+      }
+    }
+    if (!changed) break;
+  }
+  return out;
 }
 
 export async function handleIncomingWhatsAppMessage(input: {

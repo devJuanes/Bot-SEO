@@ -1,5 +1,6 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
 import { env } from '../config/env.js';
+// Re-export de la firma HMAC de Meta (compartida con Facebook/Instagram webhooks)
+export { verifyMetaWebhookSignature as verifyWebhookSignature } from '../utils/meta-signature.js';
 
 function graphUrl(path: string): string {
   return `https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${path}`;
@@ -33,7 +34,11 @@ async function callGraphApi(path: string, body: Record<string, unknown>): Promis
     const message =
       (payload as { error?: { message?: string } } | null)?.error?.message ??
       response.statusText;
-    throw new Error(`WhatsApp API error (${response.status}): ${message}`);
+    const hint =
+      response.status === 401
+        ? ' — Regenera WHATSAPP_ACCESS_TOKEN (System User permanente) y reinicia el bot. GET /api/whatsapp/diagnostics'
+        : '';
+    throw new Error(`WhatsApp API error (${response.status}): ${message}${hint}`);
   }
   return payload;
 }
@@ -106,18 +111,7 @@ export function isWhatsAppConfigured(): boolean {
 
 /**
  * Verifica la firma X-Hub-Signature-256 que Meta envía en cada webhook.
+ * Implementación ahora vive en src/utils/meta-signature.ts (compartida con Facebook/Instagram).
+ * Esta función se re-exporta por compatibilidad con código existente.
  * https://developers.facebook.com/docs/graph-api/webhooks/getting-started#verification-requests
  */
-export function verifyWebhookSignature(rawBody: string, signatureHeader?: string): boolean {
-  if (!env.META_APP_SECRET) return true; // no secret configured yet — allow (dev mode)
-  if (!signatureHeader?.startsWith('sha256=')) return false;
-
-  const expected = createHmac('sha256', env.META_APP_SECRET).update(rawBody, 'utf8').digest('hex');
-  const provided = signatureHeader.slice('sha256='.length);
-
-  const expectedBuf = Buffer.from(expected, 'hex');
-  const providedBuf = Buffer.from(provided, 'hex');
-  if (expectedBuf.length !== providedBuf.length) return false;
-
-  return timingSafeEqual(expectedBuf, providedBuf);
-}
