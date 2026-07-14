@@ -1,6 +1,6 @@
 import { logAgentRun, upsertLead } from '../../db/leads.js';
 import { getMatuByteSummary } from '../../knowledge/matubyte.js';
-import { pushLog } from '../../runtime/state.js';
+import { pushLog, sendAgentMessage } from '../../runtime/state.js';
 import type { Agent, AgentContext, AgentResult } from '../types.js';
 import { scrapeGoogleMapsPlaces } from './maps-scraper.js';
 
@@ -128,8 +128,22 @@ export const leadHunterAgent: Agent = {
           },
         });
 
-        if (action === 'inserted') inserted += 1;
-        else duplicates += 1;
+        if (action === 'inserted') {
+          inserted += 1;
+          sendAgentMessage({
+            from: 'lead-hunter',
+            to: 'broadcast',
+            topic: 'leads.created',
+            body: `${lead.name}${city ? ` · ${city}` : ''}`,
+            payload: {
+              leadId: lead.id,
+              name: lead.name,
+              city,
+              phone: lead.phone,
+              status: lead.status,
+            },
+          });
+        } else duplicates += 1;
 
         saved.push({
           name: lead.name,

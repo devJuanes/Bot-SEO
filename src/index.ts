@@ -11,12 +11,14 @@ import { growthApiRoutes } from './routes/growth-api.js';
 import { whatsappWebhookRoutes } from './routes/whatsapp-webhook.js';
 import { whatsappApiRoutes } from './routes/whatsapp-api.js';
 import { facebookWebhookRoutes } from './routes/facebook-webhook.js';
+import { adminPushRoutes } from './routes/admin-push.js';
 import { startScheduler, stopScheduler } from './jobs/scheduler.js';
 import {
   bootstrapRuntime,
   startAutopilot,
 } from './runtime/orchestrator.js';
 import { seedAgentDefinitions, seedDefaultAppConnection } from './db/growth.js';
+import { attachAdminSocket } from './realtime/admin-socket.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -58,6 +60,7 @@ async function main(): Promise<void> {
   await app.register(growthApiRoutes);
   await app.register(whatsappWebhookRoutes);
   await app.register(whatsappApiRoutes);
+  await app.register(adminPushRoutes);
 
   if (env.FB_WEBHOOK_ENABLED) {
     await app.register(facebookWebhookRoutes);
@@ -114,6 +117,7 @@ async function main(): Promise<void> {
 
   try {
     await app.listen({ port: env.PORT, host: '0.0.0.0' });
+    attachAdminSocket(app.server);
     app.log.info(
       {
         port: env.PORT,
@@ -121,6 +125,7 @@ async function main(): Promise<void> {
         headlessMode: env.HEADLESS_MODE,
         autopilot: env.AUTO_START_AGENTS,
         cockpit: `http://127.0.0.1:${env.PORT}/`,
+        adminPush: `ws://127.0.0.1:${env.PORT}/socket.io · admin:notify`,
       },
       'Growth Factory Phase 4 ready',
     );

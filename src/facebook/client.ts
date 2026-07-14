@@ -58,10 +58,15 @@ async function callGraphApi(
       error?: { message?: string; code?: number; error_subcode?: number; type?: string };
     } | null)?.error;
     const message = err?.message ?? response.statusText;
-    const permHint =
-      response.status === 403 || err?.code === 200
-        ? ' — Regenera el Page token en Graph API Explorer con pages_manage_posts + pages_show_list + pages_read_engagement, elige la Página MatuByte, y usa el access_token de me/accounts (no el de usuario).'
-        : '';
+    const lower = message.toLowerCase();
+    const needsPageToken =
+      response.status === 403 ||
+      err?.code === 200 ||
+      lower.includes('publish_actions') ||
+      lower.includes('no permission to publish the video');
+    const permHint = needsPageToken
+      ? ' — Usa el access_token de me/accounts (type=PAGE, name=MatuByte), no el de usuario. Permisos: pages_manage_posts + pages_show_list + pages_read_engagement + publish_video.'
+      : '';
     throw new Error(
       `Facebook API error (${response.status}): ${message}${permHint}`,
     );

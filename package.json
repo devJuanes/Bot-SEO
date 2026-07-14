@@ -26,6 +26,7 @@
     "fastify": "^5.2.1",
     "node-cron": "^3.0.3",
     "playwright": "^1.50.1",
+    "socket.io": "^4.8.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {

@@ -182,18 +182,24 @@ FB_PAGE_ID=106280654981120
 FB_PAGE_ACCESS_TOKEN=EAAxxxxx   # token de PÁGINA (me/accounts), no el de WhatsApp
 ```
 
-### Credenciales (si sale `#200 Permissions error`)
+### Credenciales (si sale `#200 publish_actions` o `#100 No permission to publish the video`)
+
+**Causa habitual:** en `.env` quedó el token de **usuario** (Graph Explorer lo genera así). Publicar exige el token de **Página** de `me/accounts`.
+
+Comprobar: con el token en `me`, si responde tu nombre → USER (mal). Si responde `MatuByte` → PAGE (bien).
 
 1. [Graph API Explorer](https://developers.facebook.com/tools/explorer/)
 2. App correcta → **Agregar permiso** y marca:
    - `pages_show_list`
    - `pages_read_engagement`
-   - `pages_manage_posts` ← **obligatorio para publicar**
+   - `pages_manage_posts` ← obligatorio para posts/fotos
+   - `publish_video` ← **obligatorio para videos** (`/{page-id}/videos`)
    - `pages_manage_metadata` (recomendado)
 3. **Generar token de acceso** → en el diálogo elige la Página **MatuByte**
-4. Endpoint `me/accounts` → Enviar
-5. Copia el `access_token` del bloque `"name": "MatuByte"` → `FB_PAGE_ACCESS_TOKEN`
-6. El `id` → `FB_PAGE_ID`
-7. Actualiza `.env` en **local y en el VPS** (`growth.matubyte.com`) y reinicia el servicio
+4. Endpoint `GET me/accounts` → Enviar
+5. Copia el `access_token` del bloque `"name": "MatuByte"` → `FB_PAGE_ACCESS_TOKEN`  
+   (no uses el token largo de la barra superior del Explorer)
+6. El `id` → `FB_PAGE_ID` (`106280654981120`)
+7. Actualiza `.env` en **local y en el VPS** (`growth.matubyte.com`) y reinicia el servicio si hace falta
 
 Flujo manual: agente genera → `pending_review` → apruebas en el panel → publica.
