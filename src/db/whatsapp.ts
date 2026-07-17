@@ -316,3 +316,17 @@ export async function listCampaigns(limit = 30): Promise<WhatsAppCampaign[]> {
   if (error) throw new Error(`listCampaigns: ${errMsg(error)}`);
   return (data ?? []) as WhatsAppCampaign[];
 }
+
+export async function listFailedCampaignTargets(
+  campaignId: string,
+  limit = 5,
+): Promise<Array<{ wa_id: string; error: string | null; status: string }>> {
+  const { data, error } = await db
+    .from('whatsapp_campaign_targets')
+    .select('wa_id, error, status')
+    .eq('campaign_id', campaignId)
+    .eq('status', 'failed')
+    .limit(limit);
+  if (error) throw new Error(`listFailedCampaignTargets: ${errMsg(error)}`);
+  return (data ?? []) as Array<{ wa_id: string; error: string | null; status: string }>;
+}

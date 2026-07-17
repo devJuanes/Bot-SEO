@@ -35,11 +35,11 @@
             style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
           <input name="templateName" placeholder="Nombre exacto de la plantilla (Meta)" required
             style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
-          <input name="templateLanguage" placeholder="Idioma plantilla (ej: es)" value="es"
+          <input name="templateLanguage" placeholder="Idioma EXACTO de Meta (es / en / en_US)" value="en"
             style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
           <input name="appSlug" placeholder="Slug de app a ofrecer (opcional, ej: matucrm)"
             style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
-          <input name="bodyParams" placeholder="Params separados por coma (ej: {{name}},{{sector}})"
+          <input name="bodyParams" placeholder="Params separados por coma (ej: {{name}})" value="{{name}}"
             style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
           <input name="sector" placeholder="Filtrar por sector (opcional, ej: peluquerias)"
             style="background:#05040f;border:2px solid var(--cyan);color:#fff;padding:0.55rem 0.7rem;font-family:VT323,monospace;font-size:1.2rem" />
@@ -48,8 +48,10 @@
           <button class="btn" type="submit">LANZAR CAMPAÑA</button>
         </form>
         <p class="hint">
-          La plantilla debe existir y estar APROBADA en Meta Business Manager antes de usarla aquí.
-          Placeholders soportados en params: {{name}}, {{sector}}, {{city}}.
+          La plantilla debe estar APROBADA en Meta. El idioma debe coincidir con el de Meta
+          (si en Manager dice English → usa <code>en</code>). Params: <code>{{name}}</code> rellena el {{1}}.
+          Clic en una campaña para ver errores de envío. Prueba 1 número con
+          <code>POST /api/whatsapp/templates/test</code>.
         </p>
       </section>
 

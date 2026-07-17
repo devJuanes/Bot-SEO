@@ -2,13 +2,14 @@ import type { FastifyInstance } from 'fastify';
 import {
   getConversationById,
   listConversations,
+  listFailedCampaignTargets,
   listMessages,
   resetUnread,
   setConversationMode,
 } from '../db/whatsapp.js';
 import { sendHumanReply } from '../whatsapp/bot.js';
 import { launchCampaign, type CampaignLeadFilter } from '../whatsapp/campaigns.js';
-import { isWhatsAppConfigured } from '../whatsapp/client.js';
+import { isWhatsAppConfigured, sendTemplateMessage } from '../whatsapp/client.js';
 import { listCampaigns } from '../db/whatsapp.js';
 
 export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
@@ -133,6 +134,45 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/whatsapp/campaigns', async () => ({
     campaigns: await listCampaigns(30),
   }));
+
+  app.get<{ Params: { id: string } }>(
+    '/api/whatsapp/campaigns/:id/failures',
+    async (request) => ({
+      failures: await listFailedCampaignTargets(request.params.id, 8),
+    }),
+  );
+
+  /** Prueba 1 envío de plantilla a un número (sin campaña masiva). */
+  app.post<{
+    Body: {
+      to?: string;
+      templateName?: string;
+      templateLanguage?: string;
+      bodyParams?: string[];
+    };
+  }>('/api/whatsapp/templates/test', async (request, reply) => {
+    const body = request.body ?? {};
+    const to = String(body.to ?? '').replace(/\D/g, '');
+    if (!to || to.length < 10) {
+      return reply.code(400).send({ error: 'to (teléfono) requerido, ej: 573001112233' });
+    }
+    if (!body.templateName) {
+      return reply.code(400).send({ error: 'templateName requerido' });
+    }
+    try {
+      const result = await sendTemplateMessage(
+        to,
+        body.templateName,
+        body.templateLanguage || 'es',
+        body.bodyParams ?? [],
+      );
+      return { ok: true, ...result };
+    } catch (err) {
+      return reply.code(400).send({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 
   app.post<{
     Body: {

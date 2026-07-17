@@ -56,6 +56,24 @@ async function loadConversations() {
     .join('');
 }
 
+async function showCampaignFailures(campaignId, campaignName) {
+  try {
+    const res = await fetch(`/api/whatsapp/campaigns/${encodeURIComponent(campaignId)}/failures`);
+    const data = await res.json();
+    const failures = data.failures || [];
+    if (failures.length === 0) {
+      alert(`${campaignName}\nSin detalle de errores guardado.`);
+      return;
+    }
+    const lines = failures
+      .map((f) => `• ${f.wa_id}: ${f.error || 'sin mensaje'}`)
+      .join('\n');
+    alert(`Errores de "${campaignName}" (muestra):\n\n${lines}\n\nSi dice language/template: el idioma debe coincidir con Meta (prueba en o es).`);
+  } catch (err) {
+    alert(`No se pudieron cargar errores: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 async function loadCampaigns() {
   const res = await fetch('/api/whatsapp/campaigns');
   const data = await res.json();
@@ -69,23 +87,33 @@ async function loadCampaigns() {
   campaignsList.innerHTML = campaigns
     .map(
       (c) => `
-      <div class="lead-row">
+      <button type="button" class="lead-row" data-campaign-id="${esc(c.id)}" data-campaign-name="${esc(c.name)}" style="width:100%;text-align:left;cursor:pointer;background:transparent;border:0;color:inherit;font:inherit;display:grid">
         <span>${esc(c.name)}</span>
-        <span>${esc(c.template_name)}</span>
+        <span>${esc(c.template_name)} · lang ${esc(c.template_language)}</span>
         <span class="badge">${esc(c.status)}</span>
         <span>${esc(c.sent_count)}/${esc(c.total_targets)} · fail ${esc(c.failed_count)}</span>
-      </div>`,
+      </button>`,
     )
     .join('');
+
+  campaignsList.querySelectorAll('[data-campaign-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      showCampaignFailures(btn.getAttribute('data-campaign-id'), btn.getAttribute('data-campaign-name'));
+    });
+  });
 }
 
 newCampaignBtn?.addEventListener('click', () => {
+  if (!campaignForm) return;
   campaignForm.style.display = campaignForm.style.display === 'none' ? 'block' : 'none';
 });
 
 campaignFormEl?.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const formData = new FormData(event.currentTarget);
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) return;
+
+  const formData = new FormData(form);
   const bodyParams = String(formData.get('bodyParams') || '')
     .split(',')
     .map((s) => s.trim())
@@ -97,10 +125,12 @@ campaignFormEl?.addEventListener('submit', async (event) => {
   if (sector) leadFilter.sector = sector;
   if (city) leadFilter.city = city;
 
+  const lang = String(formData.get('templateLanguage') || 'es').trim() || 'es';
+
   const payload = {
     name: formData.get('name'),
     templateName: formData.get('templateName'),
-    templateLanguage: formData.get('templateLanguage') || 'es',
+    templateLanguage: lang,
     appSlug: formData.get('appSlug') || undefined,
     bodyParamsTemplate: bodyParams,
     leadFilter,
@@ -111,16 +141,21 @@ campaignFormEl?.addEventListener('submit', async (event) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    alert(data.error || 'Error al crear la campaña');
+    alert(data.error || `Error al crear la campaña (${res.status})`);
     return;
   }
 
-  alert(`Campaña lanzada: ${data.totalTargets} destinatarios`);
-  campaignForm.style.display = 'none';
-  event.currentTarget.reset();
+  alert(`Campaña lanzada: ${data.totalTargets} destinatarios\nIdioma: ${lang}\nParams: ${bodyParams.join(', ') || '(ninguno)'}`);
+  if (campaignForm) campaignForm.style.display = 'none';
+  form.reset();
+  // Restaurar idioma sugerido tras reset
+  const langInput = form.querySelector('[name="templateLanguage"]');
+  if (langInput instanceof HTMLInputElement) langInput.value = 'en';
+  const paramsInput = form.querySelector('[name="bodyParams"]');
+  if (paramsInput instanceof HTMLInputElement) paramsInput.value = '{{name}}';
   await loadCampaigns();
 });
 
