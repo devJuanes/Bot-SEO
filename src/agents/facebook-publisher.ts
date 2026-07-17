@@ -1,9 +1,7 @@
 import {
   buildKnowledgeContext,
-  getAppBySlug,
   getFacebookPublisherSettings,
   insertContentScript,
-  listAppConnections,
   listRecentTrendUrls,
   updateContentScriptFb,
 } from '../db/growth.js';
@@ -23,6 +21,12 @@ import type { Agent, AgentContext, AgentResult } from './types.js';
 import { pickFacebookImage } from '../knowledge/blog-images.js';
 import { resolveFacebookMedia } from '../facebook/images.js';
 import { env } from '../config/env.js';
+import { EDITORIAL_RULES, pickWeightedPillar } from '../knowledge/editorial.js';
+import {
+  focusPromptBlock,
+  listRecentPillars,
+  pickContentFocus,
+} from '../knowledge/content-focus.js';
 
 function slugify(value: string): string {
   return value
@@ -69,6 +73,9 @@ export interface FacebookPublisherOptions {
   appSlug?: string;
 }
 
+/** Cursor en memoria para no elegir siempre trends[0]. */
+let trendCursor = 0;
+
 function pickTrend(
   trends: TrendItem[],
   hint: string | undefined,
@@ -81,8 +88,10 @@ function pickTrend(
     const partial = trends.find((t) => t.title.toLowerCase().includes(lower));
     if (partial) return partial;
   }
-  // Round-robin simple: prioriza news sobre reddit por orden de inserción.
-  return trends[0];
+  // Rotación activa/reciente-aware entre el pool fresco (no siempre [0]).
+  const idx = trendCursor % trends.length;
+  trendCursor += 1;
+  return trends[idx] ?? trends[0] ?? null;
 }
 
 export const facebookPublisherAgent: Agent = {
@@ -141,7 +150,9 @@ export const facebookPublisherAgent: Agent = {
       });
 
       // 1. Tendencias externas (Reddit + Google News)
-      const externalTrends = await fetchTrendingTopics().catch(() => []);
+      const externalTrends = await fetchTrendingTopics({
+        source: opts.trendSource,
+      }).catch(() => []);
       pushLog({
         level: 'info',
         agentId: this.id,
@@ -165,13 +176,16 @@ export const facebookPublisherAgent: Agent = {
         };
       }
 
-      // 3. App foco (primer app_connections activo o appSlug explícito)
-      const app = opts.appSlug
-        ? await getAppBySlug(opts.appSlug).catch(() => null)
-        : (await listAppConnections().catch(() => []))[0] ?? null;
-      const appBlock = app
-        ? `App foco: ${app.name} (${app.app_url ?? 'N/A'})\nBrand voice: ${app.brand_voice ?? 'técnico cercano'}\nDescription: ${app.description ?? ''}`
-        : 'App foco: (sin app_connections registradas)';
+      // 3. Foco de producto (rotación activa/reciente — no apps[0] más nuevo)
+      const recentPillars = await listRecentPillars(14).catch(() => []);
+      const pillar = pickWeightedPillar(recentPillars);
+      const focus = await pickContentFocus({
+        appSlug: opts.appSlug,
+        pillar,
+      });
+      const appBlock = focus
+        ? focusPromptBlock(focus)
+        : 'Foco: (sin app_connections ni catálogo — contenido educativo genérico MatuByte)';
 
       // 4. Signals internas + knowledge
       const { fetchInternalSignals } = await import('../facebook/trends.js');
@@ -186,24 +200,27 @@ export const facebookPublisherAgent: Agent = {
           {
             role: 'system',
             content: `Eres social media manager SEO de MatuByte S.A.S. (Cali, Colombia · alcance global).
-MatuByte crea software a medida, apps web/móvil, CRM, automatizaciones y herramientas SEO.
+MatuByte crea software a medida, LMS, CRM, finanzas, parking, PDF/email APIs, MatuDB y desarrollo custom. FymApp es aliado DIAN (no propio).
 
-Tu trabajo: convertir UNA tendencia en un post de Facebook listo para aprobar/publicar, optimizado para alcance orgánico y marca.
+Tu trabajo: convertir UNA tendencia en un post de Facebook listo para aprobar (manual) o publicar, value-first.
 
-Reglas:
+${EDITORIAL_RULES}
+
+Reglas de formato:
 - Español claro (Colombia), tono experto cercano. Máx 2 emojis.
-- Hook ≤90 caracteres con keyword natural (software, automatización, CRM, IA, etc. cuando encaje).
-- Cuerpo 2-4 párrafos cortos: dolor PYME → insight → MatuByte sin hard-sell.
+- Hook ≤90 caracteres con keyword natural cuando encaje.
+- Cuerpo 2-4 párrafos: insight útil para emprendedores, developers o público general → opcionalmente 1 mención de producto.
 - Incluye 1 pregunta que invite comentario (algoritmo FB).
-- CTA suave con matubyte.com
+- CTA suave con matubyte.com solo si el pilar lo permite (máx 1).
 - 4–6 hashtags mixtos (marca + nicho + geo suave).
 - seo_title ≤60 chars; seo_keywords 3–6 términos de búsqueda.
 - image_themes: 3–5 palabras/frases para buscar stock (foto o video). En inglés conviene.
 - media_type: "image" | "video" | "auto"
   - usa "video" si el tema se presta a movimiento (demo, automatización, IA, procesos)
-  - "image" si es más estático (CRM, cotización, tip)
+  - "image" si es más estático (CRM, tip, guía)
   - "auto" si no estás seguro
 - NO inventes URLs de media.
+- Pilar sugerido: ${pillar}
 - Devuelve SOLO JSON:
   {
     "hook": "...",
@@ -213,9 +230,9 @@ Reglas:
     "media_type": "auto",
     "topic": "tema corto",
     "seo_title": "...",
-    "seo_keywords": ["software a medida", "PYMES Colombia"]
+    "seo_keywords": ["software a medida", "emprendimiento Colombia", "desarrollo web"]
   }
-- "message" = post completo (hook + cuerpo + CTA + hashtags al final).`,
+- "message" = post completo (hook + cuerpo + CTA opcional + hashtags al final).`,
           },
           {
             role: 'user',
@@ -304,7 +321,12 @@ Devuelve SOLO JSON.`,
         trend_url: trend.url,
         publish_status: initialStatus,
         metadata: {
-          app_slug: app?.slug ?? null,
+          app_slug: focus?.slug ?? null,
+          product_slug: focus?.slug ?? null,
+          catalog_slug: focus?.slug ?? null,
+          audience_pillar: pillar,
+          ownership: focus?.ownership ?? null,
+          focus_source: focus?.source ?? null,
           trend_summary: trend.summary ?? null,
           model: completion.model,
           usage: completion.usage ?? null,

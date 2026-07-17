@@ -44,6 +44,32 @@
         gap: 0.45rem;
         margin-top: 0.6rem;
       }
+      .fb-media-editor {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 0.45rem;
+        margin: 0.65rem 0;
+        padding: 0.6rem;
+        border: 1px dashed #4ff;
+      }
+      .fb-media-editor input,
+      .fb-media-editor select {
+        min-width: 0;
+        background: #05040f;
+        border: 1px solid var(--cyan);
+        color: #fff;
+        font-family: VT323, monospace;
+        font-size: 1rem;
+        padding: 0.35rem;
+      }
+      .fb-media-editor input[type="file"],
+      .fb-media-editor .media-status {
+        grid-column: 1 / -1;
+      }
+      .media-status {
+        color: #9ff;
+        font-family: VT323, monospace;
+      }
       textarea.fb-edit {
         width: 100%;
         min-height: 120px;

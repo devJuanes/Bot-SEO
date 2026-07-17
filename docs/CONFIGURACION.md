@@ -3,9 +3,16 @@
 ## 1. Knowledge base (obligatorio)
 Edita y mantén actualizado:
 
-- `docs/MATUBYTE.md` → identidad, ICP, productos, tono, CTA
+- `docs/MATUBYTE.md` → identidad, ICP, catálogo de productos, tono, CTA
+- `src/knowledge/product-catalog.ts` → catálogo machine-readable (incluye aliado FymApp)
 
-Los agentes (chat, blog, radar, social) leen este archivo en cada corrida.
+Los agentes (chat, blog, radar, social, curator, planner) leen este knowledge en cada corrida.
+
+### Diversificación editorial
+- `catalog-curator` — rota productos del catálogo y deja brief + draft en cola (`pending_review`)
+- `editorial-planner` — lote de briefs por pilares (educación/general/emprendedores/developers/trends/casos/comercial), mayoría educativa, ≤1 CTA
+- `social-creator` / `facebook-publisher` — ya no usan siempre `apps[0]` (más nuevo); rotan activos y evitan slugs recientes
+- No auto-publicar: drafts van a cola manual salvo `FB_AUTO_PUBLISH=true`
 
 ## 2. Knowledge en base de datos (recomendado)
 Tabla `site_knowledge` (editable vía API):
@@ -36,7 +43,7 @@ Usa keys sugeridas:
 En `.env` ([docs OpenAI SDK](https://platform.minimax.io/docs/api-reference/text-openai-api)):
 
 ```env
-LLM_PROVIDER=api
+LLM_PROVIDER=minimax
 LLM_BASE_URL=https://api.minimax.io/v1
 LLM_API_KEY=sk-cp-tu-key
 LLM_MODEL=MiniMax-M3
@@ -52,22 +59,28 @@ Conecta cada producto Matu* para que el robot social sepa qué promocionar:
 ```http
 POST /api/apps
 {
-  "name": "MatuCRM",
-  "slug": "matucrm",
+  "name": "CMR",
+  "slug": "cmr",
   "platform": "web_app",
   "app_url": "https://crm.matubyte.com",
   "access_token": "token-opcional",
-  "description": "CRM para PYMES…",
+  "description": "CRM para equipos comerciales en Colombia y LatAm…",
   "features": ["pipeline", "cotizaciones", "leads web"],
   "brand_voice": "cercano, técnico, Cali"
 }
 ```
 
-Luego dispara:
+Luego dispara (sin `appSlug` rota activos/catálogo):
 
 ```http
 POST /agents/social-creator/run
-{ "appSlug": "matucrm", "platform": "instagram" }
+{ "platform": "instagram" }
+
+POST /agents/catalog-curator/run
+{}
+
+POST /agents/editorial-planner/run
+{ "batchSize": 3 }
 ```
 
 ## 5. Fuentes de oportunidades (empleos / gov / foros)
@@ -179,7 +192,7 @@ FB_PUBLISHER_ENABLED=true
 FB_DRY_RUN=false         # false = publica de verdad
 FB_AUTO_PUBLISH=false    # false = tú apruebas; true = auto
 FB_PAGE_ID=106280654981120
-FB_PAGE_ACCESS_TOKEN=EAAxxxxx   # token de PÁGINA (me/accounts), no el de WhatsApp
+FB_PAGE_ACCESS_TOKEN=EAAxxxxx   # token PAGE de larga duración, no el de WhatsApp
 ```
 
 ### Credenciales (si sale `#200 publish_actions` o `#100 No permission to publish the video`)
@@ -195,11 +208,27 @@ Comprobar: con el token en `me`, si responde tu nombre → USER (mal). Si respon
    - `pages_manage_posts` ← obligatorio para posts/fotos
    - `publish_video` ← **obligatorio para videos** (`/{page-id}/videos`)
    - `pages_manage_metadata` (recomendado)
-3. **Generar token de acceso** → en el diálogo elige la Página **MatuByte**
-4. Endpoint `GET me/accounts` → Enviar
-5. Copia el `access_token` del bloque `"name": "MatuByte"` → `FB_PAGE_ACCESS_TOKEN`  
-   (no uses el token largo de la barra superior del Explorer)
-6. El `id` → `FB_PAGE_ID` (`106280654981120`)
-7. Actualiza `.env` en **local y en el VPS** (`growth.matubyte.com`) y reinicia el servicio si hace falta
+3. Genera un **User Token corto** con esos permisos.
+4. Intercámbialo por un User Token largo y pide los Page Tokens con
+   `node scripts/renew-meta-token.mjs "TU_APP_ID" "TU_APP_SECRET" "TU_USER_TOKEN"`.
+5. Copia el token del bloque `"Página: MatuByte"` → `FB_PAGE_ACCESS_TOKEN`.
+   El diagnóstico `/api/facebook/diagnostics` debe responder `name: "MatuByte"`.
+6. El Page ID es `106280654981120`.
+7. Actualiza `.env` en **local y en el VPS** (`growth.matubyte.com`) y reinicia el servicio.
+
+El Page Token largo muestra `expires_at: 0`; no caduca por tiempo, aunque Meta
+puede revocarlo si cambias la contraseña, quitas permisos o eliminas la app.
+
+### Cambiar imagen o video antes de publicar
+
+En cada tarjeta pendiente puedes:
+
+- pegar una URL pública y elegir **IMAGEN** o **VIDEO**;
+- cargar JPG, PNG, WEBP, MP4, WEBM o MOV (máximo 100 MB);
+- quitar el medio y publicar solo texto.
+
+Los archivos cargados se guardan fuera de Git y se envían a Meta como binario,
+por lo que también funcionan desde el cockpit local. El botón **APROBAR +
+PUBLICAR** siempre vuelve a leer el draft guardado antes de enviarlo.
 
 Flujo manual: agente genera → `pending_review` → apruebas en el panel → publica.

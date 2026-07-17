@@ -25,12 +25,13 @@ export function getMatuByteSummary(): {
     hq: 'Cali, Colombia',
     scope: 'Colombia + LatAm / remoto',
     products: [
-      'Apps web/móvil a medida',
-      'Automatizaciones y agentes IA',
-      'MatuDB / Matu AI / MatuCRM / PayMatuByte',
-      'SEO, growth y captación de leads',
+      'MatuCourse, EBook App',
+      'MatuPark/Parking, CMR, MatuCash',
+      'MatuSendMail, MatuPDF, MatuPicks, MatuDB',
+      'Desarrollo a medida (web/móvil/APIs/bots)',
+      'Aliado: FymApp (ERP / facturación DIAN — no es producto MatuByte)',
     ],
-    icp: 'Negocios sin web, con leads desordenados, o que necesitan app/CRM/automatización',
+    icp: 'Emprendedores, negocios sin web, teams con leads desordenados, educadores, developers y quien necesita app/CRM/automatización',
   };
 }
 

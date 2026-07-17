@@ -1,4 +1,8 @@
 import type { FastifyInstance } from 'fastify';
+import { createWriteStream } from 'node:fs';
+import { mkdir, open, unlink } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import {
   createAppConnection,
   getAgentDefinition,
@@ -22,12 +26,99 @@ import { getAgentState, sendAgentMessage } from '../runtime/state.js';
 import { executeAgent } from '../runtime/orchestrator.js';
 import { env } from '../config/env.js';
 import {
+  getFacebookPageDiagnostics,
   isFacebookConfigured,
   isFacebookDryRun,
   publishRowMedia,
 } from '../facebook/client.js';
 import { fetchInternalSignals, fetchTrendingTopics } from '../facebook/trends.js';
 import type { AgentId } from '../agents/types.js';
+
+const FACEBOOK_UPLOAD_ROOT = resolve(
+  process.cwd(),
+  'public',
+  'uploads',
+  'facebook',
+);
+const MAX_FACEBOOK_MEDIA_BYTES = 100 * 1024 * 1024;
+const FACEBOOK_MEDIA_TYPES: Record<
+  string,
+  { extension: string; kind: 'image' | 'video' }
+> = {
+  'image/jpeg': { extension: 'jpg', kind: 'image' },
+  'image/png': { extension: 'png', kind: 'image' },
+  'image/webp': { extension: 'webp', kind: 'image' },
+  'video/mp4': { extension: 'mp4', kind: 'video' },
+  'video/webm': { extension: 'webm', kind: 'video' },
+  'video/quicktime': { extension: 'mov', kind: 'video' },
+};
+
+function isEditableFacebookPost(row: Record<string, unknown>): boolean {
+  return row.publish_status !== 'published' ||
+    (typeof row.fb_post_id === 'string' && row.fb_post_id.startsWith('fake_'));
+}
+
+function localMediaPath(row: Record<string, unknown>): string | null {
+  const metadata =
+    row.metadata && typeof row.metadata === 'object'
+      ? (row.metadata as Record<string, unknown>)
+      : {};
+  const relative =
+    typeof metadata.media_local_path === 'string'
+      ? metadata.media_local_path
+      : null;
+  if (!relative) return null;
+  const absolute = resolve(process.cwd(), relative);
+  if (
+    absolute !== FACEBOOK_UPLOAD_ROOT &&
+    !absolute.startsWith(`${FACEBOOK_UPLOAD_ROOT}\\`) &&
+    !absolute.startsWith(`${FACEBOOK_UPLOAD_ROOT}/`)
+  ) {
+    return null;
+  }
+  return absolute;
+}
+
+async function deletePreviousLocalMedia(
+  row: Record<string, unknown>,
+  exceptPath?: string,
+): Promise<void> {
+  const oldPath = localMediaPath(row);
+  if (!oldPath || oldPath === exceptPath) return;
+  await unlink(oldPath).catch(() => undefined);
+}
+
+async function hasExpectedMediaSignature(
+  filePath: string,
+  mime: string,
+): Promise<boolean> {
+  const handle = await open(filePath, 'r');
+  try {
+    const header = Buffer.alloc(16);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    if (bytesRead < 4) return false;
+    if (mime === 'image/jpeg') {
+      return header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+    }
+    if (mime === 'image/png') {
+      return header.subarray(0, 8).equals(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+    }
+    if (mime === 'image/webp') {
+      return header.subarray(0, 4).toString() === 'RIFF' &&
+        header.subarray(8, 12).toString() === 'WEBP';
+    }
+    if (mime === 'video/webm') {
+      return header.subarray(0, 4).equals(
+        Buffer.from([0x1a, 0x45, 0xdf, 0xa3]),
+      );
+    }
+    return header.subarray(4, 8).toString() === 'ftyp';
+  } finally {
+    await handle.close();
+  }
+}
 
 export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/agents', async () => {
@@ -212,6 +303,24 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
     };
   });
 
+  app.get('/api/facebook/diagnostics', async (_request, reply) => {
+    if (!isFacebookConfigured()) {
+      return reply.code(409).send({
+        ok: false,
+        error: 'Falta FB_PAGE_ID o FB_PAGE_ACCESS_TOKEN',
+      });
+    }
+    try {
+      const page = await getFacebookPageDiagnostics();
+      return { ok: true, page };
+    } catch (err) {
+      return reply.code(502).send({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
   app.post<{
     Body: { mode?: 'manual' | 'auto'; auto_publish?: boolean };
   }>('/api/facebook/config', async (request) => {
@@ -270,6 +379,7 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
       topic?: string;
       hashtags?: string[];
       fb_photo_url?: string | null;
+      media_type?: 'image' | 'video' | 'none';
     };
   }>('/api/facebook/posts/:id', async (request, reply) => {
     const existing = await getContentScriptById(request.params.id);
@@ -278,16 +388,130 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'El post no pertenece a Facebook' });
     }
     const body = request.body ?? {};
+    const mediaChanged =
+      body.fb_photo_url !== undefined || body.media_type !== undefined;
+    if (mediaChanged && !isEditableFacebookPost(existing)) {
+      return reply.code(409).send({
+        error: 'No se puede cambiar el medio de un post ya publicado',
+      });
+    }
+
+    if (typeof body.fb_photo_url === 'string') {
+      const rawUrl = body.fb_photo_url.trim();
+      if (rawUrl && !rawUrl.startsWith('/uploads/facebook/')) {
+        try {
+          const parsed = new URL(rawUrl);
+          if (!['http:', 'https:'].includes(parsed.protocol)) {
+            throw new Error('scheme');
+          }
+        } catch {
+          return reply.code(400).send({
+            error: 'La URL multimedia debe usar http:// o https://',
+          });
+        }
+      }
+      body.fb_photo_url = rawUrl || null;
+    }
+
+    const nextKind =
+      body.fb_photo_url === null
+        ? 'none'
+        : body.media_type ??
+          (typeof body.fb_photo_url === 'string' &&
+          /\.(mp4|mov|webm)(\?|$)/i.test(body.fb_photo_url)
+            ? 'video'
+            : body.fb_photo_url !== undefined
+              ? 'image'
+              : undefined);
     await updateContentScriptFb(request.params.id, {
       script_body: body.script_body,
       hook: body.hook,
       topic: body.topic,
       hashtags: body.hashtags,
       fb_photo_url: body.fb_photo_url,
+      metadata: mediaChanged
+        ? {
+            media_type: nextKind,
+            media_thumb: nextKind === 'none' ? null : body.fb_photo_url,
+            media_local_path: null,
+            media_original_name: null,
+          }
+        : undefined,
     });
+    if (mediaChanged) await deletePreviousLocalMedia(existing);
     const updated = await getContentScriptById(request.params.id);
     return { ok: true, post: updated };
   });
+
+  app.post<{ Params: { id: string } }>(
+    '/api/facebook/posts/:id/media',
+    async (request, reply) => {
+      const existing = await getContentScriptById(request.params.id);
+      if (!existing) return reply.code(404).send({ error: 'Post no encontrado' });
+      if (existing.platform !== 'facebook') {
+        return reply.code(400).send({ error: 'El post no pertenece a Facebook' });
+      }
+      if (!isEditableFacebookPost(existing)) {
+        return reply.code(409).send({
+          error: 'No se puede cambiar el medio de un post ya publicado',
+        });
+      }
+
+      const part = await request.file({
+        limits: { files: 1, fileSize: MAX_FACEBOOK_MEDIA_BYTES },
+      });
+      if (!part) {
+        return reply.code(400).send({ error: 'Selecciona una imagen o video' });
+      }
+      const media = FACEBOOK_MEDIA_TYPES[part.mimetype];
+      if (!media) {
+        part.file.resume();
+        return reply.code(415).send({
+          error: 'Formato no permitido. Usa JPG, PNG, WEBP, MP4, WEBM o MOV.',
+        });
+      }
+
+      await mkdir(FACEBOOK_UPLOAD_ROOT, { recursive: true });
+      const filename = `${request.params.id}-${Date.now()}.${media.extension}`;
+      const absolutePath = join(FACEBOOK_UPLOAD_ROOT, filename);
+
+      try {
+        await pipeline(part.file, createWriteStream(absolutePath, { flags: 'wx' }));
+        if (part.file.truncated) {
+          await unlink(absolutePath).catch(() => undefined);
+          return reply.code(413).send({
+            error: 'El archivo supera el límite de 100 MB',
+          });
+        }
+        if (!(await hasExpectedMediaSignature(absolutePath, part.mimetype))) {
+          await unlink(absolutePath).catch(() => undefined);
+          return reply.code(415).send({
+            error: 'El contenido del archivo no coincide con su formato',
+          });
+        }
+
+        const relativePath = `public/uploads/facebook/${filename}`;
+        const publicUrl = `/uploads/facebook/${filename}`;
+        await updateContentScriptFb(request.params.id, {
+          fb_photo_url: publicUrl,
+          error_message: null,
+          metadata: {
+            media_type: media.kind,
+            media_thumb: media.kind === 'image' ? publicUrl : null,
+            media_local_path: relativePath,
+            media_original_name: part.filename.slice(0, 200),
+            media_mime: part.mimetype,
+          },
+        });
+        await deletePreviousLocalMedia(existing, absolutePath);
+        const updated = await getContentScriptById(request.params.id);
+        return { ok: true, post: updated };
+      } catch (err) {
+        await unlink(absolutePath).catch(() => undefined);
+        throw err;
+      }
+    },
+  );
 
   app.post<{ Params: { id: string }; Body: { by?: string; forceDryRun?: boolean } }>(
     '/api/facebook/posts/:id/approve',
@@ -318,7 +542,11 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
       });
 
       try {
-        const result = await publishRowMedia(existing, { dryRun });
+        const approved = await getContentScriptById(request.params.id);
+        if (!approved) {
+          return reply.code(404).send({ error: 'Post no encontrado al publicar' });
+        }
+        const result = await publishRowMedia(approved, { dryRun });
 
         await updateContentScriptFb(request.params.id, {
           fb_post_id: result.fbPostId ?? undefined,
@@ -332,7 +560,7 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
           from: 'facebook-publisher',
           to: 'broadcast',
           topic: 'facebook.published',
-          body: `Aprobado y publicado: ${String(existing.topic ?? '')}`,
+          body: `Aprobado y publicado: ${String(approved.topic ?? '')}`,
           payload: { rowId: request.params.id, dryRun },
         });
 

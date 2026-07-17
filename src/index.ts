@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import fastifyMultipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -55,6 +56,13 @@ async function main(): Promise<void> {
       done(null, body.length === 0 ? {} : body);
     },
   );
+
+  await app.register(fastifyMultipart, {
+    limits: {
+      files: 1,
+      fileSize: 100 * 1024 * 1024,
+    },
+  });
 
   await app.register(dashboardRoutes);
   await app.register(growthApiRoutes);

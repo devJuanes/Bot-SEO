@@ -9,7 +9,9 @@ export type AgentId =
   | 'blog-writer'
   | 'social-creator'
   | 'community-agent'
-  | 'facebook-publisher';
+  | 'facebook-publisher'
+  | 'catalog-curator'
+  | 'editorial-planner';
 
 export type AgentRunStatus = 'ok' | 'skipped' | 'error';
 

@@ -1,6 +1,8 @@
 import { blogWriterAgent } from './blog-writer.js';
+import { catalogCuratorAgent } from './catalog-curator.js';
 import { communityAgentAgent } from './community-agent.js';
 import { contentRadarAgent } from './content-radar.js';
+import { editorialPlannerAgent } from './editorial-planner.js';
 import { facebookPublisherAgent } from './facebook-publisher.js';
 import { infiltratorAgent } from './infiltrator.js';
 import { leadHunterAgent } from './lead-hunter/index.js';
@@ -14,6 +16,8 @@ const agents: Agent[] = [
   infiltratorAgent,
   contentRadarAgent,
   blogWriterAgent,
+  catalogCuratorAgent,
+  editorialPlannerAgent,
   socialCreatorAgent,
   communityAgentAgent,
   facebookPublisherAgent,

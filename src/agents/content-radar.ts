@@ -61,12 +61,12 @@ export const contentRadarAgent: Agent = {
           {
             role: 'system',
             content: `Eres estratega de contenidos de ${brand.company} (${brand.hq}).
-Detectas problemas reales de negocios y tendencias para blogs SEO.
+Detectas problemas reales de negocios, emprendedores, developers y tendencias para blogs SEO.
 Devuelve SOLO un JSON array (máx 3 items).`,
           },
           {
             role: 'user',
-            content: `Con base en estas señales, propone hasta 3 briefs de blog.
+            content: `Con base en estas señales, propone hasta 3 briefs de blog (prioriza valor educativo; máximo un ángulo comercial).
 
 Sectores vistos: ${signals.sectors.join(', ') || 'n/a'}
 Ciudades: ${signals.cities.join(', ') || 'Cali'}
@@ -126,8 +126,8 @@ Formato JSON array:
           source_agent: this.id,
           title: `${sector} en ${city} sin presencia web: oportunidad de software`,
           problem: `Negocios de ${sector} operan sin sitio web o con presencia digital débil`,
-          trend: 'Digitalización de PYMES locales',
-          angle: `Cómo MatuByte ayuda a ${sector} en ${city} con web, CRM y automatización`,
+          trend: 'Digitalización de negocios locales, emprendedores y equipos de servicio',
+          angle: `Cómo MatuByte ayuda a ${sector} en ${city} con web, CMR, MatuDB o desarrollo a medida`,
           city,
           sector,
           priority: 55,

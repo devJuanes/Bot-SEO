@@ -101,27 +101,51 @@ const DEFAULT_AGENTS: Array<Omit<AgentDefinition, 'is_active'> & { is_active?: b
     sort_order: 4,
   },
   {
+    id: 'catalog-curator',
+    name: 'Agente Curador de Catálogo',
+    role: 'catalog_curator',
+    description:
+      'Rota productos del catálogo (MatuCourse, Parking, CMR, MatuSendMail, MatuPDF, EBook, MatuCash, MatuPicks, MatuDB, desarrollo a medida) y el aliado FymApp; deja briefs/drafts para aprobación manual.',
+    capabilities: ['catalog', 'rotation', 'briefs', 'drafts', 'manual_approval'],
+    system_prompt:
+      'Eres el Curador de Catálogo de MatuByte. Rotas productos, evitas repetición, value-first. FymApp es aliado DIAN, no producto propio. No auto-publicas.',
+    is_chat_enabled: true,
+    sort_order: 5,
+  },
+  {
+    id: 'editorial-planner',
+    name: 'Agente Planificador Editorial',
+    role: 'editorial_planner',
+    description:
+      'Planifica briefs diversificados por audiencia (educación, general, emprendedores, developers, trends, casos de uso, comercial) con mayoría educativa y máximo un CTA de producto.',
+    capabilities: ['editorial', 'pillars', 'briefs', 'anti_spam', 'manual_approval'],
+    system_prompt:
+      'Eres el Planificador Editorial de MatuByte. Diversificas pilares, mayoría educativa, ≤1 producto/CTA por lote. Solo cola manual.',
+    is_chat_enabled: true,
+    sort_order: 6,
+  },
+  {
     id: 'blog-writer',
     name: 'Agente Redactor de Blogs',
     role: 'writer',
     description: 'Genera artículos SEO local MatuByte y los guarda en blog_posts.',
     capabilities: ['seo', 'blog', 'llm'],
     system_prompt:
-      'Eres el Redactor SEO de MatuByte (Cali). Artículos útiles, locales, con CTA WhatsApp.',
+      'Eres el Redactor SEO de MatuByte (Cali). Artículos útiles para emprendedores, developers y público general, con CTA WhatsApp suave.',
     is_chat_enabled: true,
-    sort_order: 5,
+    sort_order: 7,
   },
   {
     id: 'social-creator',
     name: 'Agente Creador de Contenido',
     role: 'social_creator',
     description:
-      'Crea posts/scripts para Instagram/Facebook/TikTok usando tokens y ficha de cada app Matu*.',
-    capabilities: ['instagram', 'facebook', 'tiktok', 'app_tokens'],
+      'Crea posts/scripts para Instagram/Facebook/TikTok rotando fichas del catálogo / app_connections activas (no solo la más nueva).',
+    capabilities: ['instagram', 'facebook', 'tiktok', 'app_tokens', 'rotation'],
     system_prompt:
-      'Eres el Creador Social de MatuByte. Generas copies cortos, hooks y hashtags por plataforma.',
+      'Eres el Creador Social de MatuByte. Generas copies cortos, hooks y hashtags por plataforma. Rotas productos y priorizas valor.',
     is_chat_enabled: true,
-    sort_order: 6,
+    sort_order: 8,
   },
   {
     id: 'community-agent',
@@ -133,22 +157,23 @@ const DEFAULT_AGENTS: Array<Omit<AgentDefinition, 'is_active'> & { is_active?: b
     system_prompt:
       'Eres el Agente Comunidad de MatuByte. Participas como un miembro más del foro, útil y sin spam.',
     is_chat_enabled: true,
-    sort_order: 7,
+    sort_order: 9,
   },
   {
     id: 'facebook-publisher',
     name: 'Agente Facebook Publisher',
     role: 'facebook_publisher',
     description:
-      'Detecta tendencias (Reddit/News/LLM), genera posts y publica directo en la página de Facebook de MatuByte vía Meta Graph API.',
-    capabilities: ['facebook', 'trends', 'meta_graph', 'publish'],
+      'Detecta tendencias, genera posts diversificados y los deja en cola de aprobación (manual por defecto) o publica si auto está activo.',
+    capabilities: ['facebook', 'trends', 'meta_graph', 'publish', 'rotation'],
     system_prompt:
-      'Eres el Publisher de Facebook de MatuByte. Creas posts con gancho, en español, basados en tendencias reales del mercado.',
+      'Eres el Publisher de Facebook de MatuByte. Creas posts value-first, rotas productos/tendencias, sin spam. FymApp solo como aliado DIAN.',
     is_chat_enabled: true,
-    sort_order: 8,
+    sort_order: 10,
   },
 ];
 
+/** Inserta agentes nuevos y actualiza nombre/descripcion/prompt/capabilities de los existentes. */
 export async function seedAgentDefinitions(): Promise<void> {
   for (const agent of DEFAULT_AGENTS) {
     const existing = await db
@@ -161,12 +186,31 @@ export async function seedAgentDefinitions(): Promise<void> {
       throw new Error(`seedAgentDefinitions read failed: ${errMsg(existing.error)}`);
     }
 
-    if ((existing.data ?? []).length > 0) continue;
+    const payload = {
+      name: agent.name,
+      role: agent.role,
+      description: agent.description,
+      capabilities: agent.capabilities,
+      system_prompt: agent.system_prompt,
+      is_chat_enabled: agent.is_chat_enabled,
+      sort_order: agent.sort_order,
+    };
+
+    if ((existing.data ?? []).length > 0) {
+      const { error } = await db
+        .from('agent_definitions')
+        .eq('id', agent.id)
+        .update(payload);
+      if (error) {
+        throw new Error(`seedAgentDefinitions update failed: ${errMsg(error)}`);
+      }
+      continue;
+    }
 
     const { error } = await db.from('agent_definitions').insert({
-      ...agent,
+      id: agent.id,
+      ...payload,
       is_active: true,
-      capabilities: agent.capabilities,
     });
 
     if (error) {
@@ -186,15 +230,15 @@ export async function seedDefaultAppConnection(): Promise<void> {
     platform: 'web_app',
     app_url: 'https://matubyte.com',
     description:
-      'Suite de software MatuByte S.A.S.: apps a medida, MatuDB, MatuCRM, Matu AI, automatizaciones y growth para negocios en Colombia y LatAm.',
+      'Suite de software MatuByte S.A.S.: MatuCourse, MatuPark/Parking, CMR, MatuSendMail, MatuPDF, EBook App, MatuCash, MatuPicks, MatuDB, desarrollo a medida; aliado recomendado FymApp (ERP/DIAN, no propio).',
     features: [
-      'apps web/móvil',
-      'CRM',
-      'automatizaciones',
-      'SEO y leads',
-      'integraciones DIAN/PSE',
+      'MatuCourse / EBook',
+      'CMR / MatuCash',
+      'MatuDB / MatuPDF / MatuSendMail',
+      'Parking / MatuPicks',
+      'desarrollo a medida',
     ],
-    brand_voice: 'técnico, cercano, desde Cali',
+    brand_voice: 'técnico, cercano, value-first, desde Cali',
   });
 }
 
@@ -467,6 +511,8 @@ export interface FbPublishPatch {
   fb_photo_url?: string | null;
   seo_title?: string | null;
   seo_keywords?: string[];
+  /** Se fusiona con metadata existente para no borrar datos del generador. */
+  metadata?: Record<string, unknown>;
 }
 
 export async function updateContentScriptFb(
@@ -489,6 +535,14 @@ export async function updateContentScriptFb(
   if (patch.fb_photo_url !== undefined) clean.fb_photo_url = patch.fb_photo_url;
   if (patch.seo_title !== undefined) clean.seo_title = patch.seo_title;
   if (patch.seo_keywords !== undefined) clean.seo_keywords = patch.seo_keywords;
+  if (patch.metadata !== undefined) {
+    const current = await getContentScriptById(id);
+    const currentMetadata =
+      current?.metadata && typeof current.metadata === 'object'
+        ? (current.metadata as Record<string, unknown>)
+        : {};
+    clean.metadata = { ...currentMetadata, ...patch.metadata };
+  }
   clean.updated_at = new Date().toISOString();
 
   const { error } = await db.from('content_scripts').eq('id', id).update(clean);

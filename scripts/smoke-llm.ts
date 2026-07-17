@@ -13,7 +13,7 @@ async function main(): Promise<void> {
     maxTokens: 80,
     messages: [
       { role: 'system', content: 'Responde en una sola frase corta.' },
-      { role: 'user', content: 'Di solo: MatuByte Z.AI OK' },
+      { role: 'user', content: 'Di solo: MatuByte MiniMax OK' },
     ],
   });
 

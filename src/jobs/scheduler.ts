@@ -17,6 +17,8 @@ const cronMap: Array<{ agentId: AgentId; expression: string }> = [
   { agentId: 'opportunity-scout', expression: env.CRON_OPPORTUNITY_SCOUT },
   { agentId: 'infiltrator', expression: env.CRON_INFILTRATOR },
   { agentId: 'content-radar', expression: env.CRON_CONTENT_RADAR },
+  { agentId: 'catalog-curator', expression: env.CRON_CATALOG_CURATOR },
+  { agentId: 'editorial-planner', expression: env.CRON_EDITORIAL_PLANNER },
   { agentId: 'blog-writer', expression: env.CRON_BLOG_WRITER },
   { agentId: 'social-creator', expression: env.CRON_SOCIAL_CREATOR },
   { agentId: 'community-agent', expression: env.CRON_COMMUNITY_AGENT },

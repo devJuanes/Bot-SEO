@@ -105,9 +105,9 @@ export const blogWriterAgent: Agent = {
           {
             role: 'system',
             content: `Eres redactor SEO de ${brand.company} (${brand.hq}).
-Escribes en español colombiano, útil y concreto, orientado a PYMES.
-El artículo debe partir del PROBLEMA/TENDENCIA real y conectar con soluciones MatuByte (web, app, CRM, automatización).
-Devuelve JSON.`,
+Escribes en español colombiano, útil y concreto, para emprendedores, developers, educadores y público general (no solo PYMES).
+El artículo debe partir del PROBLEMA/TENDENCIA real y conectar con soluciones MatuByte cuando aporte valor (web, app, CMR, MatuDB, automatización, LMS). FymApp solo como aliado DIAN si aplica.
+Máximo un CTA de producto. Devuelve JSON.`,
           },
           {
             role: 'user',
@@ -139,6 +139,7 @@ JSON:
       const parsed = extractJson(completion.content);
       const title = String(parsed.title ?? topic);
       const slug = `${slugify(title)}-${Date.now().toString(36)}`;
+      const publishImmediately = ctx.params?.publish === true;
 
       await insertBlogPost({
         title,
@@ -152,6 +153,8 @@ JSON:
           : [],
         city,
         sector: sector ?? undefined,
+        // El cron deja draft; solo una ejecución manual explícita publica.
+        status: publishImmediately ? 'published' : 'draft',
       });
 
       if (briefId) {
@@ -162,8 +165,15 @@ JSON:
         from: 'blog-writer',
         to: 'broadcast',
         topic: 'blog.created',
-        body: `Blog desde tendencia/problema: ${title}`,
-        payload: { slug, city, problem, trend, briefId },
+        body: `${publishImmediately ? 'Blog publicado' : 'Blog draft para revisión'}: ${title}`,
+        payload: {
+          slug,
+          city,
+          problem,
+          trend,
+          briefId,
+          status: publishImmediately ? 'published' : 'draft',
+        },
       });
 
       sendAgentMessage({
@@ -176,8 +186,16 @@ JSON:
 
       const result: AgentResult = {
         status: 'ok',
-        reason: `Blog draft: ${slug}`,
-        details: { slug, title, city, problem, trend, briefId },
+        reason: `Blog ${publishImmediately ? 'publicado' : 'draft'}: ${slug}`,
+        details: {
+          slug,
+          title,
+          city,
+          problem,
+          trend,
+          briefId,
+          status: publishImmediately ? 'published' : 'draft',
+        },
       };
 
       await logAgentRun({

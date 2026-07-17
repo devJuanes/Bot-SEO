@@ -5,7 +5,7 @@ import { withRetry } from '../utils/retry.js';
  *
  * Fuentes (todas sin API keys externas):
  *  - Reddit RSS público (subreddits: technology, startups, Colombia)
- *  - Google News RSS público (query "software Colombia OR transformación digital PYMES")
+ *  - Google News RSS público (query amplia: software, IA, DIAN, LMS, startups LatAm, etc.)
  *
  * El parser es regex nativo porque el repo no incluye fast-xml-parser
  * (no queremos meter una dep solo para esto). Reddit + Google News devuelven
@@ -24,9 +24,20 @@ export interface TrendItem {
   summary?: string;
 }
 
-const DEFAULT_SUBREDDITS = ['technology', 'startups', 'Colombia'];
+const DEFAULT_SUBREDDITS = [
+  'technology',
+  'startups',
+  'Colombia',
+  'programming',
+  'webdev',
+  'MachineLearning',
+  'entrepreneur',
+  'smallbusiness',
+  'opensource',
+  'devops',
+];
 const DEFAULT_NEWS_QUERY =
-  'software Colombia OR tecnología Cali OR transformación digital PYMES';
+  'software Colombia OR desarrollo web OR inteligencia artificial OR facturación electrónica DIAN OR LMS educación OR PostgreSQL OR automatización OR startups LatAm OR parking tecnología OR CRM ventas';
 const REDDIT_UA = 'MatuByte-FB-Publisher/1.0 (+https://matubyte.com)';
 
 async function fetchText(url: string): Promise<string> {
@@ -68,8 +79,16 @@ function stripHtml(s: string): string {
 }
 
 async function fetchReddit(): Promise<TrendItem[]> {
+  // Rota un subconjunto para diversificar sin martillar todos los feeds cada corrida.
+  const dayBucket = Math.floor(Date.now() / (6 * 60 * 60 * 1000));
+  const start = dayBucket % DEFAULT_SUBREDDITS.length;
+  const subset: string[] = [];
+  for (let i = 0; i < Math.min(4, DEFAULT_SUBREDDITS.length); i += 1) {
+    subset.push(DEFAULT_SUBREDDITS[(start + i) % DEFAULT_SUBREDDITS.length]!);
+  }
+
   const all: TrendItem[] = [];
-  for (const sub of DEFAULT_SUBREDDITS) {
+  for (const sub of subset) {
     const url = `https://www.reddit.com/r/${sub}/top.rss?t=day`;
     try {
       const xml = await fetchText(url);

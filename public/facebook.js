@@ -4,9 +4,13 @@ const pendingList = document.getElementById('pendingList');
 const recentList = document.getElementById('recentList');
 
 async function api(path, opts) {
+  const isForm = opts?.body instanceof FormData;
   const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
     ...opts,
+    headers: {
+      ...(isForm ? {} : { 'Content-Type': 'application/json' }),
+      ...(opts?.headers || {}),
+    },
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || res.statusText);
@@ -18,6 +22,10 @@ function esc(s) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
+}
+
+function attr(s) {
+  return esc(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function card(post, { editable = false } = {}) {
@@ -71,11 +79,41 @@ function card(post, { editable = false } = {}) {
     ? `<textarea class="fb-edit" id="body-${esc(id)}">${esc(post.script_body)}</textarea>`
     : `<div class="fb-body">${esc(post.script_body)}</div>`;
 
+  const mediaEditor = editable
+    ? `<div class="fb-media-editor">
+        <input
+          type="url"
+          id="media-url-${attr(id)}"
+          value="${attr(post.fb_photo_url || '')}"
+          placeholder="https://... imagen o video"
+          aria-label="URL de imagen o video"
+        />
+        <select id="media-kind-${attr(id)}" aria-label="Tipo de medio">
+          <option value="image" ${mediaType === 'image' ? 'selected' : ''}>IMAGEN</option>
+          <option value="video" ${mediaType === 'video' ? 'selected' : ''}>VIDEO</option>
+          <option value="none" ${mediaType === 'none' ? 'selected' : ''}>SIN MEDIO</option>
+        </select>
+        <input
+          type="file"
+          id="media-file-${attr(id)}"
+          accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime"
+          aria-label="Cargar imagen o video"
+        />
+        <span class="media-status" id="media-status-${attr(id)}">
+          Puedes pegar una URL o cargar un archivo (máx. 100 MB).
+        </span>
+        <button class="btn" data-act="save-media" data-id="${attr(id)}">GUARDAR URL</button>
+        <button class="btn" data-act="upload-media" data-id="${attr(id)}">SUBIR ARCHIVO</button>
+        <button class="btn" data-act="remove-media" data-id="${attr(id)}">QUITAR MEDIO</button>
+      </div>`
+    : '';
+
   return `
     <article class="fb-card" data-id="${esc(id)}">
       <h3>${esc(post.topic || post.hook || 'Post')}</h3>
       <p class="fb-meta">${esc(status)} · ${esc(post.trend_source || '—')} · ${esc(post.created_at || '')}</p>
       ${seo}${photo}${err}
+      ${mediaEditor}
       ${body}
       ${actions}
     </article>`;
@@ -83,6 +121,14 @@ function card(post, { editable = false } = {}) {
 
 async function loadConfig() {
   const cfg = await api('/api/facebook/config');
+  let page = null;
+  if (cfg.configured) {
+    try {
+      page = (await api('/api/facebook/diagnostics')).page;
+    } catch {
+      // La pista principal se muestra abajo sin tumbar toda la cola.
+    }
+  }
   const mode = cfg.effectiveMode || 'manual';
   document.querySelectorAll('input[name="mode"]').forEach((el) => {
     el.checked = el.value === mode;
@@ -91,12 +137,14 @@ async function loadConfig() {
     cfg.enabled ? 'ON' : 'OFF',
     mode.toUpperCase(),
     cfg.dryRun ? '⚠ DRY (no sube)' : 'LIVE',
-    cfg.configured ? 'TOKEN✓' : 'TOKEN✗',
+    cfg.configured && page ? 'TOKEN✓' : 'TOKEN✗',
   ].join(' · ');
   cfgHint.textContent = cfg.dryRun
     ? '⚠ FB_DRY_RUN=true (o el proceso no recargó .env). Pon FB_DRY_RUN=false, guarda, reinicia npm run dev. Los posts "fake_" NO están en Facebook.'
     : cfg.configured
-      ? `LIVE · Página ${cfg.pageId} · Graph ${cfg.graphVersion} · modo: ${mode}`
+      ? page
+        ? `LIVE · ${page.name} (${page.id}) · Graph ${cfg.graphVersion} · modo: ${mode}`
+        : `TOKEN INVÁLIDO/EXPIRADO · Página ${cfg.pageId}. Actualiza FB_PAGE_ACCESS_TOKEN.`
       : 'Falta FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN en .env.';
 }
 
@@ -186,9 +234,42 @@ document.body.addEventListener('click', async (ev) => {
         method: 'PATCH',
         body: JSON.stringify({ script_body: ta?.value ?? '' }),
       });
+    } else if (act === 'save-media') {
+      const url = document.getElementById(`media-url-${id}`)?.value?.trim() || null;
+      const kind = document.getElementById(`media-kind-${id}`)?.value || 'none';
+      await api(`/api/facebook/posts/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          fb_photo_url: kind === 'none' ? null : url,
+          media_type: kind,
+        }),
+      });
+    } else if (act === 'upload-media') {
+      const input = document.getElementById(`media-file-${id}`);
+      const status = document.getElementById(`media-status-${id}`);
+      const file = input?.files?.[0];
+      if (!file) throw new Error('Selecciona una imagen o video');
+      btn.disabled = true;
+      btn.textContent = 'SUBIENDO...';
+      if (status) status.textContent = `${file.name} · ${Math.ceil(file.size / 1024)} KB`;
+      const form = new FormData();
+      form.append('media', file);
+      await api(`/api/facebook/posts/${id}/media`, {
+        method: 'POST',
+        body: form,
+      });
+    } else if (act === 'remove-media') {
+      await api(`/api/facebook/posts/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ fb_photo_url: null, media_type: 'none' }),
+      });
     }
     await refresh();
   } catch (e) {
+    if (act === 'upload-media') {
+      btn.disabled = false;
+      btn.textContent = 'SUBIR ARCHIVO';
+    }
     alert(e.message);
   }
 });

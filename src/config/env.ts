@@ -40,15 +40,24 @@ const envSchema = z.object({
   MATUDB_API_KEY: z.string().min(1, 'MATUDB_API_KEY is required'),
   MATUDB_SERVICE_KEY: z.string().min(1).optional(),
 
-  LLM_PROVIDER: z.literal('api', {
-    errorMap: () => ({
-      message:
-        'Only LLM_PROVIDER=api is supported for now. Ollama (local) is deferred to a later phase.',
-    }),
-  }),
-  LLM_BASE_URL: z.string().url().default('https://api.minimax.io/v1'),
+  // 'api' se mantiene como alias histórico; en runtime siempre es MiniMax.
+  LLM_PROVIDER: z
+    .enum(['minimax', 'api'])
+    .default('minimax')
+    .transform(() => 'minimax' as const),
+  LLM_BASE_URL: z
+    .string()
+    .url()
+    .default('https://api.minimax.io/v1')
+    .refine(
+      (value) => new URL(value).hostname === 'api.minimax.io',
+      'LLM_BASE_URL debe usar api.minimax.io',
+    ),
   LLM_API_KEY: z.string().min(1, 'LLM_API_KEY is required'),
-  LLM_MODEL: z.string().min(1).default('MiniMax-M3'),
+  LLM_MODEL: z
+    .string()
+    .regex(/^MiniMax-/, 'LLM_MODEL debe ser un modelo MiniMax')
+    .default('MiniMax-M3'),
 
   HEADLESS_MODE: booleanFromEnv,
   WHATSAPP_CTA_URL: z.preprocess(
@@ -97,6 +106,8 @@ const envSchema = z.object({
   CRON_OPPORTUNITY_SCOUT: z.string().min(1).default('30 */6 * * *'),
   CRON_INFILTRATOR: z.string().min(1).default('0 */4 * * *'),
   CRON_CONTENT_RADAR: z.string().min(1).default('0 7 * * *'),
+  CRON_CATALOG_CURATOR: z.string().min(1).default('0 6 * * *'),
+  CRON_EDITORIAL_PLANNER: z.string().min(1).default('30 6 * * *'),
   CRON_BLOG_WRITER: z.string().min(1).default('0 8 * * *'),
   CRON_SOCIAL_CREATOR: z.string().min(1).default('0 9 * * *'),
   CRON_COMMUNITY_AGENT: z.string().min(1).default('0 */3 * * *'),
@@ -115,14 +126,8 @@ export type Env = z.infer<typeof envSchema> & {
 };
 
 function loadEnv(): Env {
-  if (process.env.LLM_PROVIDER === 'local') {
-    throw new Error(
-      'Invalid environment configuration:\n  - LLM_PROVIDER: LLM_PROVIDER=local (Ollama) is not supported yet. Set LLM_PROVIDER=api and provide LLM_API_KEY.',
-    );
-  }
-
   if (!process.env.LLM_PROVIDER) {
-    process.env.LLM_PROVIDER = 'api';
+    process.env.LLM_PROVIDER = 'minimax';
   }
 
   if (process.env.AUTO_START_AGENTS === undefined) {

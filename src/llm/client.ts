@@ -33,15 +33,6 @@ function resolveChatCompletionsUrl(baseUrl: string): string {
     return normalized;
   }
 
-  // Z.AI OpenAI-compatible: https://api.z.ai/api/paas/v4
-  if (
-    normalized.endsWith('/v4') ||
-    normalized.includes('/paas/v4') ||
-    normalized.includes('/coding/paas/v4')
-  ) {
-    return `${normalized}/chat/completions`;
-  }
-
   if (normalized.endsWith('/v1')) {
     return `${normalized}/chat/completions`;
   }
@@ -50,7 +41,7 @@ function resolveChatCompletionsUrl(baseUrl: string): string {
 }
 
 function isMiniMax(): boolean {
-  return /minimax\.io/i.test(env.LLM_BASE_URL);
+  return env.LLM_PROVIDER === 'minimax';
 }
 
 function cleanAssistantContent(raw: string): string {
