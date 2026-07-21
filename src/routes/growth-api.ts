@@ -21,9 +21,10 @@ import {
   upsertBotSetting,
   upsertSiteKnowledge,
 } from '../db/growth.js';
-import { chatWithAgent } from '../services/agent-chat.js';
+import { chatWithAgent, streamChatWithAgent } from '../services/agent-chat.js';
 import { getAgentState, sendAgentMessage } from '../runtime/state.js';
 import { executeAgent } from '../runtime/orchestrator.js';
+import { isAgentEnabledForProject } from '../db/project-agents.js';
 import { env } from '../config/env.js';
 import {
   getFacebookPageDiagnostics,
@@ -172,8 +173,58 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
 
   app.post<{
     Params: { id: string };
+    Body: { sessionId?: string; message?: string };
+  }>('/api/agents/:id/chat/stream', async (request, reply) => {
+    const message = request.body?.message?.trim();
+    if (!message) return reply.code(400).send({ error: 'message required' });
+    const sessionId = request.body?.sessionId || `ui-${request.params.id}`;
+
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    });
+
+    const send = (event: string, data: unknown) => {
+      reply.raw.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    try {
+      for await (const chunk of streamChatWithAgent({
+        agentId: request.params.id,
+        sessionId,
+        message,
+      })) {
+        if (chunk.type === 'thinking') send('thinking', {});
+        else if (chunk.type === 'token') send('token', { text: chunk.text });
+        else if (chunk.type === 'done') send('done', { reply: chunk.reply, sessionId: chunk.sessionId });
+      }
+    } catch (err) {
+      send('error', { message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      reply.raw.end();
+    }
+  });
+
+  app.post<{
+    Params: { id: string };
     Body: Record<string, unknown>;
   }>('/api/agents/:id/run', async (request, reply) => {
+    const projectId = request.tenant?.projectId;
+    if (projectId) {
+      const enabled = await isAgentEnabledForProject(
+        projectId,
+        request.params.id,
+      );
+      if (!enabled) {
+        return reply.code(403).send({
+          error: 'Este agente no está habilitado para el proyecto. Añádelo desde el cockpit.',
+        });
+      }
+    }
+
     try {
       const { result } = await executeAgent(
         request.params.id as AgentId,
@@ -258,56 +309,89 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Querystring: { limit?: string; status?: string } }>(
     '/api/facebook/posts',
     async (request) => {
+      const { withRequestTenant } = await import('../tenancy/context.js');
       const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 30)));
       const status = request.query.status?.trim() || undefined;
-      try {
-        const posts = await listFacebookPosts({ status, limit });
-        return { posts };
-      } catch (err) {
-        return {
-          error: err instanceof Error ? err.message : String(err),
-          posts: [],
-        };
-      }
+      return withRequestTenant(request.tenant, async () => {
+        try {
+          const posts = await listFacebookPosts({ status, limit });
+          return { posts };
+        } catch (err) {
+          return {
+            error: err instanceof Error ? err.message : String(err),
+            posts: [],
+          };
+        }
+      });
     },
   );
 
-  app.get('/api/facebook/pending', async () => ({
-    posts: await listFacebookPosts({ status: 'pending_review', limit: 50 }),
-  }));
+  app.get('/api/facebook/pending', async (request, reply) => {
+    const { withRequestTenant } = await import('../tenancy/context.js');
+    try {
+      return await withRequestTenant(request.tenant, async () => {
+        const configured = await isFacebookConfigured();
+        const posts = await listFacebookPosts({ status: 'pending_review', limit: 50 });
+        return { posts, configured };
+      });
+    } catch (err) {
+      return reply.code(500).send({
+        error: err instanceof Error ? err.message : 'Error al cargar cola',
+        posts: [],
+      });
+    }
+  });
 
-  app.get('/api/facebook/failed', async () => ({
-    failed: await listFailedFbPosts(20),
-  }));
+  app.get('/api/facebook/failed', async (request, reply) => {
+    const { withRequestTenant } = await import('../tenancy/context.js');
+    try {
+      return await withRequestTenant(request.tenant, async () => ({
+        failed: await listFailedFbPosts(20),
+      }));
+    } catch (err) {
+      return reply.code(500).send({
+        error: err instanceof Error ? err.message : 'Error al cargar fallos',
+        failed: [],
+      });
+    }
+  });
 
-  app.get('/api/facebook/config', async () => {
+  app.get('/api/facebook/config', async (request) => {
+    const { withRequestTenant } = await import('../tenancy/context.js');
+    return withRequestTenant(request.tenant, async () => {
     const settings = await getFacebookPublisherSettings().catch(() => ({
       mode: 'manual' as const,
       auto_publish: false,
     }));
+    const { tryLoadCurrentProjectConfig } = await import(
+      '../tenancy/project-config.js'
+    );
+    const cfg = await tryLoadCurrentProjectConfig().catch(() => null);
     return {
-      enabled: env.FB_PUBLISHER_ENABLED === true,
-      dryRun: isFacebookDryRun(),
+      enabled: cfg?.facebook.enabled ?? env.FB_PUBLISHER_ENABLED === true,
+      dryRun: await isFacebookDryRun(),
       autoPublishEnv: env.FB_AUTO_PUBLISH === true,
-      configured: isFacebookConfigured(),
-      pageId: env.FB_PAGE_ID ?? null,
-      hasToken: Boolean(env.FB_PAGE_ACCESS_TOKEN),
+      configured: await isFacebookConfigured(),
+      pageId: cfg?.facebook.pageId ?? env.FB_PAGE_ID ?? null,
+      hasToken: Boolean(cfg?.facebook.pageAccessToken || env.FB_PAGE_ACCESS_TOKEN),
       graphVersion: env.FB_GRAPH_VERSION,
       settings,
       effectiveMode:
+        cfg?.facebook.autoPublish === true ||
         env.FB_AUTO_PUBLISH === true ||
         settings.auto_publish ||
         settings.mode === 'auto'
           ? 'auto'
           : 'manual',
     };
+    });
   });
 
   app.get('/api/facebook/diagnostics', async (_request, reply) => {
-    if (!isFacebookConfigured()) {
+    if (!(await isFacebookConfigured())) {
       return reply.code(409).send({
         ok: false,
-        error: 'Falta FB_PAGE_ID o FB_PAGE_ACCESS_TOKEN',
+        error: 'Facebook no configurado para este proyecto. Ve a Ajustes.',
       });
     }
     try {
@@ -526,8 +610,8 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const forceDryRun = Boolean(request.body?.forceDryRun);
-      const dryRun = forceDryRun || isFacebookDryRun();
-      if (!dryRun && !isFacebookConfigured()) {
+      const dryRun = forceDryRun || (await isFacebookDryRun());
+      if (!dryRun && !(await isFacebookConfigured())) {
         return reply
           .code(409)
           .send({ error: 'Facebook no configurado (FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN)' });
@@ -624,8 +708,8 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const forceDryRun = Boolean(request.body?.forceDryRun);
-      const dryRun = forceDryRun || isFacebookDryRun();
-      if (!dryRun && !isFacebookConfigured()) {
+      const dryRun = forceDryRun || (await isFacebookDryRun());
+      if (!dryRun && !(await isFacebookConfigured())) {
         return reply
           .code(409)
           .send({ error: 'Facebook no configurado y dry-run desactivado' });
@@ -634,7 +718,7 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
       if (dryRun) {
         return reply.code(409).send({
           error:
-            'FB_DRY_RUN sigue activo. Pon FB_DRY_RUN=false en .env y reinicia el bot antes de RETRY LIVE.',
+            'Modo dry-run activo. Desactívalo en Ajustes del proyecto antes de publicar en vivo.',
         });
       }
 
@@ -680,17 +764,52 @@ export async function growthApiRoutes(app: FastifyInstance): Promise<void> {
   );
 
   app.post('/api/facebook/generate', async (request, reply) => {
-    if (!env.FB_PUBLISHER_ENABLED) {
-      return reply
-        .code(409)
-        .send({ error: 'FB_PUBLISHER_ENABLED=false — actívalo en .env' });
-    }
+    const body = (request.body ?? {}) as {
+      customPrompt?: string;
+      savePrompt?: boolean;
+    };
+
     try {
+      const { getTenant } = await import('../tenancy/context.js');
+      const { getProjectSetting, setProjectSetting } = await import('../tenancy/store.js');
+      const { isFacebookConfigured } = await import('../facebook/client.js');
+      const tenant = getTenant();
+      const projectId = tenant?.projectId;
+
+      if (projectId && body.customPrompt !== undefined && body.savePrompt !== false) {
+        await setProjectSetting(projectId, 'facebook_custom_prompt', body.customPrompt);
+      }
+
+      const storedPrompt = projectId
+        ? ((await getProjectSetting<string>(projectId, 'facebook_custom_prompt')) ?? '')
+        : '';
+      const customPrompt =
+        (typeof body.customPrompt === 'string' && body.customPrompt.trim()) ||
+        (typeof storedPrompt === 'string' ? storedPrompt : '') ||
+        undefined;
+
+      const projectCfg = await import('../tenancy/project-config.js')
+        .then((m) => m.tryLoadCurrentProjectConfig())
+        .catch(() => null);
+      const enabled =
+        projectCfg?.facebook.enabled ?? env.FB_PUBLISHER_ENABLED;
+      if (!enabled) {
+        return reply
+          .code(409)
+          .send({ error: 'Facebook Publisher deshabilitado — actívalo en Ajustes' });
+      }
+
+      if (!(await isFacebookConfigured()) && !(projectCfg?.facebook.dryRun ?? env.FB_DRY_RUN)) {
+        return reply.code(409).send({
+          error: 'Configura Facebook en Ajustes antes de generar contenido',
+        });
+      }
+
       const { result } = await executeAgent(
         'facebook-publisher',
         request.log,
         'manual',
-        { forceAutoPublish: false },
+        { forceAutoPublish: false, customPrompt },
       );
       return { ok: result.status === 'ok', result };
     } catch (err) {

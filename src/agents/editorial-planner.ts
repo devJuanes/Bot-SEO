@@ -54,10 +54,10 @@ export const editorialPlannerAgent: Agent = {
       Math.max(2, Number(ctx.params?.batchSize ?? 3) || 3),
     );
 
-    if (!isLlmConfigured() || /smoke|replace_me|changeme|xxx/i.test(ctx.env.LLM_API_KEY)) {
+    if (!(await isLlmConfigured())) {
       return {
         status: 'error',
-        reason: 'LLM_API_KEY inválida para editorial-planner',
+        reason: 'LLM no configurado para este proyecto',
       };
     }
 

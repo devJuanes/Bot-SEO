@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ajustes · MatuByte Growth Factory</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body class="saas-app">
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <span class="brand-mark">M</span>
+        <div>
+          <strong>MatuByte</strong>
+          <span class="brand-sub">Growth Factory</span>
+        </div>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="/" class="nav-link">Dashboard</a>
+        <a href="/whatsapp.html" class="nav-link">WhatsApp</a>
+        <a href="/facebook.html" class="nav-link">Facebook</a>
+        <a href="/settings.html" class="nav-link active">Ajustes</a>
+      </nav>
+      <div class="sidebar-footer">
+        <div id="projectSwitcher" class="project-switcher-wrap"></div>
+      </div>
+    </aside>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div class="topbar-left">
+          <h1 class="page-title">Ajustes del proyecto</h1>
+          <p class="page-subtitle" id="projectSubtitle">Configura integraciones y credenciales</p>
+        </div>
+        <div class="topbar-right">
+          <button id="saveBtn" class="btn btn-primary">Guardar cambios</button>
+        </div>
+      </header>
+
+      <main class="content-area settings-grid" id="settingsForm">
+        <section class="panel settings-section skeleton" style="min-height: 120px"></section>
+        <section class="panel settings-section skeleton" style="min-height: 120px"></section>
+        <section class="panel settings-section skeleton" style="min-height: 120px"></section>
+      </main>
+    </div>
+
+    <script src="/saas-auth.js"></script>
+    <script>
+      (async function bootstrapSettings() {
+        if (!GrowthAuth.requireAuthOrRedirect()) return;
+        try {
+          const me = await GrowthAuth.loadMe();
+          await GrowthAuth.ensureProjectReady();
+          GrowthAuth.mountProjectSwitcher(
+            document.getElementById('projectSwitcher'),
+            me,
+          );
+          const s = document.createElement('script');
+          s.type = 'module';
+          s.src = '/settings.js';
+          document.body.appendChild(s);
+        } catch {
+          GrowthAuth.clearSession();
+        }
+      })();
+    </script>
+  </body>
+</html>

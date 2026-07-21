@@ -7,7 +7,6 @@ export async function rootRoutes(app: FastifyInstance): Promise<void> {
       company: 'MatuByte S.A.S.',
       phase: 4,
       message: 'Fábrica de Growth API',
-      cockpit: '/',
       endpoints: {
         health: 'GET /health',
         dashboard: 'GET /api/dashboard',

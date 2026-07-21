@@ -58,11 +58,6 @@ function extractJson(text: string): Record<string, unknown> {
   }
 }
 
-function envLooksFake(key: string | undefined): boolean {
-  if (!key) return true;
-  return /smoke|replace_me|changeme|xxx/i.test(key);
-}
-
 export interface FacebookPublisherOptions {
   trendHint?: string;
   trendSource?: 'reddit' | 'news';
@@ -71,6 +66,8 @@ export interface FacebookPublisherOptions {
   /** Fuerza publicación inmediata saltando la cola (solo si FB está OK). */
   forceAutoPublish?: boolean;
   appSlug?: string;
+  /** Brief / prompt personalizado del usuario (desde project_settings o request). */
+  customPrompt?: string;
 }
 
 /** Cursor en memoria para no elegir siempre trends[0]. */
@@ -102,38 +99,43 @@ export const facebookPublisherAgent: Agent = {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const startedAt = new Date().toISOString();
 
-    if (!isLlmConfigured() || envLooksFake(ctx.env.LLM_API_KEY)) {
+    if (!(await isLlmConfigured())) {
       return {
         status: 'error',
-        reason: 'LLM_API_KEY inválida. Configura una API key real en .env.',
-      };
-    }
-
-    if (!ctx.env.FB_PUBLISHER_ENABLED) {
-      return {
-        status: 'skipped',
-        reason: 'FB_PUBLISHER_ENABLED=false en .env',
+        reason: 'LLM no configurado para este proyecto',
       };
     }
 
     const opts = (ctx.params ?? {}) as FacebookPublisherOptions;
-    const dryRun = opts.forceDryRun ?? isFacebookDryRun();
+    const dryRun = opts.forceDryRun ?? (await isFacebookDryRun());
     const fbSettings = await getFacebookPublisherSettings().catch(() => ({
       mode: 'manual' as const,
       auto_publish: false,
     }));
+    const projectCfg = await import('../tenancy/project-config.js')
+      .then((m) => m.tryLoadCurrentProjectConfig())
+      .catch(() => null);
+    const fbEnabled =
+      projectCfg?.facebook.enabled ?? ctx.env.FB_PUBLISHER_ENABLED;
+    if (!fbEnabled && !opts.forceAutoPublish) {
+      return {
+        status: 'skipped',
+        reason: 'Facebook publisher deshabilitado para este proyecto',
+      };
+    }
     const autoPublish =
       opts.forceAutoPublish === true ||
       (opts.forceAutoPublish !== false &&
-        (env.FB_AUTO_PUBLISH === true ||
+        (projectCfg?.facebook.autoPublish === true ||
+          env.FB_AUTO_PUBLISH === true ||
           fbSettings.auto_publish === true ||
           fbSettings.mode === 'auto'));
 
-    if (autoPublish && !dryRun && !isFacebookConfigured()) {
+    if (autoPublish && !dryRun && !(await isFacebookConfigured())) {
       return {
         status: 'error',
         reason:
-          'Facebook no configurado: define FB_PAGE_ID y FB_PAGE_ACCESS_TOKEN en .env o usa FB_DRY_RUN=true / modo manual.',
+          'Facebook no configurado: define facebook_page_* secrets o FB_PAGE_* en .env.',
       };
     }
 
@@ -192,6 +194,21 @@ export const facebookPublisherAgent: Agent = {
       const internalSignals = await fetchInternalSignals().catch(() => '');
       const knowledge = await buildKnowledgeContext().catch(() => '');
 
+      let customBrief = opts.customPrompt?.trim() || '';
+      if (!customBrief) {
+        try {
+          const { getTenant } = await import('../tenancy/context.js');
+          const { getProjectSetting } = await import('../tenancy/store.js');
+          const pid = getTenant()?.projectId ?? null;
+          if (pid) {
+            const stored = await getProjectSetting<string>(pid, 'facebook_custom_prompt');
+            if (typeof stored === 'string') customBrief = stored.trim();
+          }
+        } catch {
+          /* optional */
+        }
+      }
+
       // 5. Prompt (sin forzar una image_url fija)
       const completion = await chatCompletion({
         temperature: 0.85,
@@ -245,6 +262,7 @@ Reglas de formato:
 
 ${appBlock}
 
+${customBrief ? `BRIEF PERSONALIZADO DEL USUARIO (prioridad alta):\n${customBrief}\n` : ''}
 Señales internas MatuByte (para anclar el post a clientes reales):
 ${internalSignals.slice(0, 3500)}
 

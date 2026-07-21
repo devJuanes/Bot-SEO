@@ -119,7 +119,7 @@
           <button id="saveModeBtn" class="btn">GUARDAR MODO</button>
         </div>
         <p class="hint" id="cfgHint">
-          FB_PAGE_ID + FB_PAGE_ACCESS_TOKEN en .env. Con FB_DRY_RUN=true no publica de verdad.
+          Configura Facebook en Ajustes del proyecto. Con dry-run activo no publica de verdad.
         </p>
       </section>
 
@@ -139,6 +139,12 @@
       MatuByte S.A.S. · Facebook Pages API · sql/facebook_approval.sql
     </footer>
 
+    <script src="/saas-auth.js"></script>
+    <script>
+      if (GrowthAuth.requireAuthOrRedirect()) {
+        GrowthAuth.loadMe().catch(() => {});
+      }
+    </script>
     <script src="/facebook.js" type="module"></script>
   </body>
 </html>

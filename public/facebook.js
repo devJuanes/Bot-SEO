@@ -140,12 +140,12 @@ async function loadConfig() {
     cfg.configured && page ? 'TOKEN✓' : 'TOKEN✗',
   ].join(' · ');
   cfgHint.textContent = cfg.dryRun
-    ? '⚠ FB_DRY_RUN=true (o el proceso no recargó .env). Pon FB_DRY_RUN=false, guarda, reinicia npm run dev. Los posts "fake_" NO están en Facebook.'
+    ? 'Modo dry-run activo: los posts no se publican en Facebook. Desactívalo en Ajustes.'
     : cfg.configured
       ? page
         ? `LIVE · ${page.name} (${page.id}) · Graph ${cfg.graphVersion} · modo: ${mode}`
-        : `TOKEN INVÁLIDO/EXPIRADO · Página ${cfg.pageId}. Actualiza FB_PAGE_ACCESS_TOKEN.`
-      : 'Falta FB_PAGE_ID / FB_PAGE_ACCESS_TOKEN en .env.';
+        : `Token inválido o expirado · Página ${cfg.pageId}. Actualiza en Ajustes.`
+      : 'Facebook no configurado. Ve a Ajustes del proyecto.';
 }
 
 async function loadPosts() {
@@ -208,7 +208,7 @@ document.body.addEventListener('click', async (ev) => {
       });
       if (out.dryRun || String(out.post?.fb_post_id || '').startsWith('fake_')) {
         alert(
-          '⚠️ Se marcó publicado en DRY-RUN (no salió a Facebook).\n\nPon FB_DRY_RUN=false en .env, reinicia el bot, y usa RETRY en el post.',
+          'Publicado en modo dry-run (no salió a Facebook). Desactiva dry-run en Ajustes y usa RETRY.',
         );
       } else {
         alert(

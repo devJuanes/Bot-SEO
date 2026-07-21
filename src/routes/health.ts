@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { pingDatabase } from '../db/matu.js';
-import { isLlmConfigured } from '../llm/client.js';
+import { isLlmConfiguredSync } from '../llm/client.js';
 import { env } from '../config/env.js';
 import { listScheduledJobs } from '../jobs/scheduler.js';
 
@@ -17,7 +17,7 @@ export async function healthRoutes(app: FastifyInstance): Promise<void> {
       checks: {
         db: dbPing.ok ? 'ok' : 'error',
         dbError: dbPing.error,
-        llm: isLlmConfigured() ? 'configured' : 'missing',
+        llm: isLlmConfiguredSync() ? 'configured' : 'missing',
         headlessMode: env.HEADLESS_MODE,
         scheduledJobs: listScheduledJobs(),
       },

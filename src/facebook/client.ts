@@ -29,15 +29,34 @@ interface PageCredentials {
 }
 
 function requireCredentials(): PageCredentials {
+  // Sync fallback to env; prefer project secrets via resolvePageCredentials().
   refreshEnvFromDisk();
   const token = process.env.FB_PAGE_ACCESS_TOKEN?.trim();
   const pageId = process.env.FB_PAGE_ID?.trim();
   if (!token || !pageId) {
     throw new Error(
-      'Facebook Publisher no configurado. Define FB_PAGE_ID y FB_PAGE_ACCESS_TOKEN en .env, o usa FB_DRY_RUN=true para simular.',
+      'Facebook Publisher no configurado. Define facebook_page_* secrets o FB_PAGE_* en .env.',
     );
   }
   return { token, pageId };
+}
+
+async function resolvePageCredentials(): Promise<PageCredentials> {
+  const { tryLoadCurrentProjectConfig } = await import(
+    '../tenancy/project-config.js'
+  );
+  const cfg = await tryLoadCurrentProjectConfig().catch(() => null);
+  if (cfg) {
+    const token = cfg.facebook.pageAccessToken?.trim();
+    const pageId = cfg.facebook.pageId?.trim();
+    if (!token || !pageId) {
+      throw new Error(
+        'Facebook no configurado para este proyecto. Configúralo en Ajustes.',
+      );
+    }
+    return { token, pageId };
+  }
+  return requireCredentials();
 }
 
 function graphError(
@@ -70,7 +89,7 @@ async function callGraphApi(
   path: string,
   body: Record<string, unknown>,
 ): Promise<unknown> {
-  const { token } = requireCredentials();
+  const { token } = await resolvePageCredentials();
   const response = await fetch(graphUrl(path), {
     method: 'POST',
     headers: {
@@ -91,7 +110,7 @@ async function callGraphMultipart(
   path: string,
   body: FormData,
 ): Promise<unknown> {
-  const { token } = requireCredentials();
+  const { token } = await resolvePageCredentials();
   const response = await fetch(graphUrl(path), {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -106,7 +125,7 @@ export async function getFacebookPageDiagnostics(): Promise<{
   id: string;
   name: string;
 }> {
-  const { pageId, token } = requireCredentials();
+  const { pageId, token } = await resolvePageCredentials();
   const url = new URL(graphUrl(pageId));
   url.searchParams.set('fields', 'id,name');
   url.searchParams.set('access_token', token);
@@ -127,7 +146,7 @@ export interface PublishResult {
 }
 
 export async function publishFeedPost(message: string): Promise<PublishResult> {
-  const { pageId } = requireCredentials();
+  const { pageId } = await resolvePageCredentials();
   const payload = await callGraphApi(`${pageId}/feed`, {
     message,
   });
@@ -143,7 +162,7 @@ export async function publishPhotoPost(
   imageUrl: string,
   caption: string,
 ): Promise<PublishResult> {
-  const { pageId } = requireCredentials();
+  const { pageId } = await resolvePageCredentials();
   const payload = await callGraphApi(`${pageId}/photos`, {
     caption,
     url: imageUrl,
@@ -165,7 +184,7 @@ export async function publishVideoPost(
   videoUrl: string,
   description: string,
 ): Promise<PublishResult> {
-  const { pageId } = requireCredentials();
+  const { pageId } = await resolvePageCredentials();
   const payload = await callGraphApi(`${pageId}/videos`, {
     file_url: videoUrl,
     description,
@@ -211,7 +230,7 @@ export async function publishPhotoFile(
   filePath: string,
   caption: string,
 ): Promise<PublishResult> {
-  const { pageId } = requireCredentials();
+  const { pageId } = await resolvePageCredentials();
   const body = new FormData();
   body.set('caption', caption);
   body.set('published', 'true');
@@ -229,7 +248,7 @@ export async function publishVideoFile(
   filePath: string,
   description: string,
 ): Promise<PublishResult> {
-  const { pageId } = requireCredentials();
+  const { pageId } = await resolvePageCredentials();
   const body = new FormData();
   body.set('description', description);
   body.set('published', 'true');
@@ -266,22 +285,31 @@ export async function publishWithRetry(
   return withRetry(publish, { attempts: 2, delayMs: 1200, label });
 }
 
-export function isFacebookConfigured(): boolean {
+export async function isFacebookConfigured(): Promise<boolean> {
+  const { tryLoadCurrentProjectConfig } = await import(
+    '../tenancy/project-config.js'
+  );
+  const cfg = await tryLoadCurrentProjectConfig().catch(() => null);
+  if (cfg) return cfg.facebook.configured;
   refreshEnvFromDisk();
   return Boolean(
     process.env.FB_PAGE_ACCESS_TOKEN?.trim() && process.env.FB_PAGE_ID?.trim(),
   );
 }
 
-export function isFacebookDryRun(): boolean {
+export async function isFacebookDryRun(): Promise<boolean> {
+  const { tryLoadCurrentProjectConfig } = await import(
+    '../tenancy/project-config.js'
+  );
+  const cfg = await tryLoadCurrentProjectConfig().catch(() => null);
+  if (cfg) return cfg.facebook.dryRun || !(await isFacebookConfigured());
+
   refreshEnvFromDisk();
   const raw = (process.env.FB_DRY_RUN ?? '').trim().toLowerCase();
-  // Vacío o true → dry-run. Solo "false"/"0"/"off" publica de verdad.
   if (raw === '' || ['true', '1', 'yes', 'on'].includes(raw)) return true;
   if (['false', '0', 'no', 'off'].includes(raw)) {
-    return !isFacebookConfigured();
+    return !(await isFacebookConfigured());
   }
-  // Valor raro → seguro en dry-run
   return true;
 }
 

@@ -1,5 +1,10 @@
 import { db } from './matu.js';
 import type { AgentRunInsert, Lead, LeadInsert } from './types.js';
+import {
+  requireProjectId,
+  tenantInsertFields,
+  tryTenantInsertFields,
+} from '../tenancy/context.js';
 
 function errorMessage(error: unknown): string {
   if (typeof error === 'string') return error;
@@ -26,12 +31,15 @@ export function normalizeName(name: string): string {
     .trim();
 }
 
+function scopedLeads() {
+  return db.from('leads').eq('project_id', requireProjectId());
+}
+
 export async function findLeadByExternalId(
   source: string,
   externalId: string,
 ): Promise<Lead | null> {
-  const { data, error } = await db
-    .from('leads')
+  const { data, error } = await scopedLeads()
     .select('*')
     .eq('source', source)
     .eq('external_id', externalId)
@@ -59,8 +67,7 @@ export async function findDuplicateLead(input: {
 
   const phone = normalizePhone(input.phone);
   if (phone) {
-    const { data, error } = await db
-      .from('leads')
+    const { data, error } = await scopedLeads()
       .select('*')
       .eq('source', input.source)
       .limit(80);
@@ -78,8 +85,7 @@ export async function findDuplicateLead(input: {
   const needle = normalizeName(input.name);
   const city = input.city?.toLowerCase().trim();
   if (needle) {
-    const { data, error } = await db
-      .from('leads')
+    const { data, error } = await scopedLeads()
       .select('*')
       .eq('source', input.source)
       .limit(120);
@@ -113,7 +119,6 @@ export async function upsertLead(lead: LeadInsert): Promise<{
   });
 
   if (existing) {
-    // Enrich existing row but never create a duplicate company.
     const { data, error } = await db
       .from('leads')
       .eq('id', existing.id)
@@ -152,6 +157,7 @@ export async function upsertLead(lead: LeadInsert): Promise<{
 
   const { data, error } = await db.from('leads').insert({
     ...lead,
+    ...tenantInsertFields(),
     needs_website: lead.needs_website ?? false,
     status: lead.status ?? 'new',
     country: lead.country ?? 'CO',
@@ -172,6 +178,7 @@ export async function upsertLead(lead: LeadInsert): Promise<{
 export async function logAgentRun(run: AgentRunInsert): Promise<void> {
   const { error } = await db.from('agent_runs').insert({
     ...run,
+    ...tryTenantInsertFields(),
     started_at: run.started_at ?? new Date().toISOString(),
     finished_at: run.finished_at ?? new Date().toISOString(),
     details: run.details ?? {},
@@ -183,8 +190,7 @@ export async function logAgentRun(run: AgentRunInsert): Promise<void> {
 }
 
 export async function listRecentLeads(limit = 30): Promise<Lead[]> {
-  const { data, error } = await db
-    .from('leads')
+  const { data, error } = await scopedLeads()
     .select('*')
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -196,22 +202,130 @@ export async function listRecentLeads(limit = 30): Promise<Lead[]> {
   return (data ?? []) as Lead[];
 }
 
-export async function listRecentRuns(limit = 20): Promise<Record<string, unknown>[]> {
-  const { data, error } = await db
+export async function listAgentRunsByAgent(
+  agentId: string,
+  limit = 80,
+): Promise<Record<string, unknown>[]> {
+  const q = db
     .from('agent_runs')
     .select('*')
+    .eq('agent_id', agentId)
     .order('created_at', { ascending: false })
     .limit(limit);
-
-  if (error) {
-    throw new Error(`listRecentRuns failed: ${errorMessage(error)}`);
+  try {
+    const projectId = requireProjectId();
+    const { data, error } = await q.eq('project_id', projectId);
+    if (error) throw new Error(`listAgentRunsByAgent failed: ${errorMessage(error)}`);
+    return (data ?? []) as Record<string, unknown>[];
+  } catch {
+    const { data, error } = await q;
+    if (error) throw new Error(`listAgentRunsByAgent failed: ${errorMessage(error)}`);
+    return (data ?? []) as Record<string, unknown>[];
   }
+}
 
-  return (data ?? []) as Record<string, unknown>[];
+export async function listRecentRuns(limit = 20): Promise<Record<string, unknown>[]> {
+  const q = db.from('agent_runs').select('*');
+  try {
+    const projectId = requireProjectId();
+    const { data, error } = await q
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(`listRecentRuns failed: ${errorMessage(error)}`);
+    return (data ?? []) as Record<string, unknown>[];
+  } catch {
+    const { data, error } = await q
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (error) throw new Error(`listRecentRuns failed: ${errorMessage(error)}`);
+    return (data ?? []) as Record<string, unknown>[];
+  }
 }
 
 export async function countLeads(): Promise<number> {
-  const { data, error } = await db.from('leads').select('id').limit(500);
-  if (error) return 0;
-  return Array.isArray(data) ? data.length : 0;
+  try {
+    const { data, error } = await scopedLeads().select('id').limit(5000);
+    if (error) return 0;
+    return Array.isArray(data) ? data.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function listLeadsPaginated(input: {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  status?: string;
+  source?: string;
+}): Promise<{ leads: Lead[]; total: number }> {
+  const limit = Math.min(100, Math.max(1, input.limit ?? 25));
+  const offset = Math.max(0, input.offset ?? 0);
+
+  const { data, error } = await scopedLeads()
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(`listLeadsPaginated failed: ${errorMessage(error)}`);
+  }
+
+  let rows = (data ?? []) as Lead[];
+  const needle = input.search?.trim().toLowerCase();
+  if (needle) {
+    rows = rows.filter(
+      (row) =>
+        row.name.toLowerCase().includes(needle) ||
+        (row.phone?.includes(needle) ?? false) ||
+        (row.city?.toLowerCase().includes(needle) ?? false) ||
+        (row.email?.toLowerCase().includes(needle) ?? false) ||
+        (row.business_type?.toLowerCase().includes(needle) ?? false),
+    );
+  }
+  if (input.status) {
+    rows = rows.filter((row) => row.status === input.status);
+  }
+  if (input.source) {
+    rows = rows.filter((row) => row.source === input.source);
+  }
+
+  return {
+    total: rows.length,
+    leads: rows.slice(offset, offset + limit),
+  };
+}
+
+export async function getLeadById(id: string): Promise<Lead | null> {
+  const { data, error } = await scopedLeads().select('*').eq('id', id).limit(1);
+  if (error) {
+    throw new Error(`getLeadById failed: ${errorMessage(error)}`);
+  }
+  return ((data ?? [])[0] as Lead | undefined) ?? null;
+}
+
+export async function getLeadStats(): Promise<{
+  total: number;
+  byStatus: Record<string, number>;
+  bySource: Record<string, number>;
+  needsWebsite: number;
+}> {
+  const { data, error } = await scopedLeads().select('status, source, needs_website');
+  if (error) {
+    throw new Error(`getLeadStats failed: ${errorMessage(error)}`);
+  }
+  const rows = (data ?? []) as Array<{
+    status: string;
+    source: string;
+    needs_website: boolean;
+  }>;
+  const byStatus: Record<string, number> = {};
+  const bySource: Record<string, number> = {};
+  let needsWebsite = 0;
+  for (const row of rows) {
+    byStatus[row.status] = (byStatus[row.status] ?? 0) + 1;
+    bySource[row.source] = (bySource[row.source] ?? 0) + 1;
+    if (row.needs_website) needsWebsite += 1;
+  }
+  return { total: rows.length, byStatus, bySource, needsWebsite };
 }

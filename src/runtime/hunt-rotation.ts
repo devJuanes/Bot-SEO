@@ -15,11 +15,23 @@ export interface HuntTarget {
 }
 
 /** Rota ciudad (CO + LatAm) y sector para no quedarse en peluquerías de Cali. */
-export function nextHuntTarget(): HuntTarget {
-  const location = HUNT_LOCATIONS[locationIndex % HUNT_LOCATIONS.length]!;
-  const sector = HUNT_SECTORS[sectorIndex % HUNT_SECTORS.length]!;
-  locationIndex = (locationIndex + 1) % HUNT_LOCATIONS.length;
-  sectorIndex = (sectorIndex + 1) % HUNT_SECTORS.length;
+export function nextHuntTarget(opts?: {
+  countryCode?: string;
+  sectors?: string[];
+}): HuntTarget {
+  const code = opts?.countryCode?.trim().toUpperCase();
+  const locations =
+    code && code.length > 0
+      ? HUNT_LOCATIONS.filter((l) => l.countryCode === code)
+      : HUNT_LOCATIONS;
+  const pool = locations.length > 0 ? locations : HUNT_LOCATIONS;
+  const sectorPool =
+    opts?.sectors && opts.sectors.length > 0 ? opts.sectors : HUNT_SECTORS;
+
+  const location = pool[locationIndex % pool.length]!;
+  const sector = sectorPool[sectorIndex % sectorPool.length]!;
+  locationIndex = (locationIndex + 1) % pool.length;
+  sectorIndex = (sectorIndex + 1) % sectorPool.length;
 
   return {
     city: location.city,

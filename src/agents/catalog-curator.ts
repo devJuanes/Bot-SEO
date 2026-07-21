@@ -43,10 +43,10 @@ export const catalogCuratorAgent: Agent = {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const startedAt = new Date().toISOString();
 
-    if (!isLlmConfigured() || /smoke|replace_me|changeme|xxx/i.test(ctx.env.LLM_API_KEY)) {
+    if (!(await isLlmConfigured())) {
       return {
         status: 'error',
-        reason: 'LLM_API_KEY inválida para catalog-curator',
+        reason: 'LLM no configurado para este proyecto',
       };
     }
 

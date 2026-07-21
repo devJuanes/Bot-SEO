@@ -34,10 +34,10 @@ export const communityAgentAgent: Agent = {
     const startedAt = new Date().toISOString();
     const brand = getMatuByteSummary();
 
-    if (!isLlmConfigured() || /smoke|replace_me/i.test(ctx.env.LLM_API_KEY)) {
+    if (!(await isLlmConfigured())) {
       return {
         status: 'error',
-        reason: 'Configura LLM_API_KEY real para participar en el foro',
+        reason: 'LLM no configurado para este proyecto',
       };
     }
 

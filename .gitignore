@@ -8,4 +8,6 @@ playwright-report/
 test-results/
 .cache/
 coverage/
+exports/
 public/uploads/facebook/
+public/uploads/whatsapp/

@@ -1,38 +1,64 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   getConversationById,
+  getOrCreateConversation,
   listConversations,
   listFailedCampaignTargets,
   listMessages,
   resetUnread,
+  saveMessage,
   setConversationMode,
 } from '../db/whatsapp.js';
 import { sendHumanReply } from '../whatsapp/bot.js';
-import { launchCampaign, type CampaignLeadFilter } from '../whatsapp/campaigns.js';
-import { isWhatsAppConfigured, sendTemplateMessage } from '../whatsapp/client.js';
-import { listCampaigns } from '../db/whatsapp.js';
+import {
+  launchCampaign,
+  resumeCampaign,
+  type CampaignLeadFilter,
+} from '../whatsapp/campaigns.js';
+import {
+  isWhatsAppConfigured,
+  listMessageTemplates,
+  sendTemplateMessage,
+} from '../whatsapp/client.js';
+import { completeCampaign, listCampaigns } from '../db/whatsapp.js';
+
+async function withTenant<T>(
+  request: FastifyRequest,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const { withRequestTenant } = await import('../tenancy/context.js');
+  return withRequestTenant(request.tenant, fn);
+}
 
 export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/whatsapp/status', async () => ({
-    configured: isWhatsAppConfigured(),
-  }));
+  app.get('/api/whatsapp/status', async (request) =>
+    withTenant(request, async () => ({
+      configured: await isWhatsAppConfigured(),
+    })),
+  );
 
   /**
    * Valida token + phone number ID contra Graph sin exponer el token.
    * Si ves ok:false con status 401 → regenera WHATSAPP_ACCESS_TOKEN (System User permanente).
    */
-  app.get('/api/whatsapp/diagnostics', async () => {
-    if (!isWhatsAppConfigured()) {
+  app.get('/api/whatsapp/diagnostics', async (request) =>
+    withTenant(request, async () => {
+    if (!(await isWhatsAppConfigured())) {
       return {
         ok: false,
         configured: false,
-        hint: 'Define WHATSAPP_ACCESS_TOKEN y WHATSAPP_PHONE_NUMBER_ID en .env',
+        hint: 'Configura WhatsApp en Ajustes del proyecto',
       };
     }
 
+    const { tryLoadCurrentProjectConfig } = await import(
+      '../tenancy/project-config.js'
+    );
     const { env } = await import('../config/env.js');
-    const phone = env.WHATSAPP_PHONE_NUMBER_ID!;
-    const token = env.WHATSAPP_ACCESS_TOKEN!;
+    const cfg = await tryLoadCurrentProjectConfig().catch(() => null);
+    const phone =
+      cfg?.whatsapp.phoneNumberId || env.WHATSAPP_PHONE_NUMBER_ID!;
+    const token = cfg?.whatsapp.accessToken || env.WHATSAPP_ACCESS_TOKEN!;
     const ver = env.WHATSAPP_API_VERSION;
 
     try {
@@ -79,22 +105,64 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
         errorMessage: err instanceof Error ? err.message : String(err),
       };
     }
-  });
+    }),
+  );
 
-  app.get('/api/whatsapp/conversations', async () => ({
-    conversations: await listConversations(60),
-  }));
+  app.get('/api/whatsapp/conversations', async (request, reply) => {
+    try {
+      return await withTenant(request, async () => {
+        if (!(await isWhatsAppConfigured())) {
+          return { conversations: [], configured: false };
+        }
+        return {
+          conversations: await listConversations(100),
+          configured: true,
+        };
+      });
+    } catch (err) {
+      request.log.error({ err }, 'whatsapp conversations');
+      return reply.code(500).send({
+        error: err instanceof Error ? err.message : 'Error al cargar conversaciones',
+        conversations: [],
+      });
+    }
+  });
 
   app.get<{ Params: { id: string } }>(
     '/api/whatsapp/conversations/:id/messages',
     async (request, reply) => {
-      const conversation = await getConversationById(request.params.id);
-      if (!conversation) return reply.code(404).send({ error: 'Conversación no encontrada' });
+      try {
+        return await withTenant(request, async () => {
+          if (!(await isWhatsAppConfigured())) {
+            return reply.code(409).send({
+              error: 'WhatsApp no configurado. Ve a Ajustes → WhatsApp.',
+            });
+          }
+          const conversation = await getConversationById(request.params.id);
+          if (!conversation) {
+            return reply.code(404).send({ error: 'Conversación no encontrada' });
+          }
 
-      const messages = await listMessages(conversation.id);
-      await resetUnread(conversation.id).catch(() => undefined);
+          const messages = await listMessages(conversation.id);
+          await resetUnread(conversation.id).catch(() => undefined);
 
-      return { conversation, messages };
+          return {
+            conversation,
+            messages: messages.map((m) => ({
+              id: m.id,
+              direction: m.direction,
+              body: m.content,
+              created_at: m.created_at,
+              sender_type: m.sender_type,
+              message_type: m.message_type,
+            })),
+          };
+        });
+      } catch (err) {
+        return reply.code(500).send({
+          error: err instanceof Error ? err.message : 'Error al cargar mensajes',
+        });
+      }
     },
   );
 
@@ -106,12 +174,19 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
     if (!text) return reply.code(400).send({ error: 'text requerido' });
 
     try {
-      await sendHumanReply({
-        conversationId: request.params.id,
-        text,
-        assignedTo: request.body?.assignedTo,
+      return await withTenant(request, async () => {
+        if (!(await isWhatsAppConfigured())) {
+          return reply.code(409).send({
+            error: 'WhatsApp no configurado. Ve a Ajustes → WhatsApp.',
+          });
+        }
+        await sendHumanReply({
+          conversationId: request.params.id,
+          text,
+          assignedTo: request.body?.assignedTo,
+        });
+        return { ok: true };
       });
-      return { ok: true };
     } catch (err) {
       return reply.code(400).send({
         error: err instanceof Error ? err.message : String(err),
@@ -127,19 +202,104 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
     if (mode !== 'bot' && mode !== 'human') {
       return reply.code(400).send({ error: 'mode debe ser bot|human' });
     }
-    await setConversationMode(request.params.id, mode, request.body?.assignedTo);
-    return { ok: true };
+    try {
+      return await withTenant(request, async () => {
+        await setConversationMode(request.params.id, mode, request.body?.assignedTo);
+        return { ok: true };
+      });
+    } catch (err) {
+      return reply.code(400).send({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   });
 
-  app.get('/api/whatsapp/campaigns', async () => ({
-    campaigns: await listCampaigns(30),
-  }));
+  app.get('/api/whatsapp/campaigns', async (request, reply) => {
+    try {
+      return await withTenant(request, async () => {
+        if (!(await isWhatsAppConfigured())) {
+          return { campaigns: [], configured: false };
+        }
+        return { campaigns: await listCampaigns(30), configured: true };
+      });
+    } catch (err) {
+      return reply.code(500).send({
+        error: err instanceof Error ? err.message : 'Error al cargar campañas',
+        campaigns: [],
+      });
+    }
+  });
+
+  app.get('/api/whatsapp/templates', async (request, reply) => {
+    try {
+      return await withTenant(request, async () => {
+        if (!(await isWhatsAppConfigured())) {
+          return {
+            templates: [],
+            configured: false,
+            error: 'WhatsApp no configurado. Ve a Ajustes → WhatsApp.',
+          };
+        }
+        const templates = await listMessageTemplates();
+        return { templates, configured: true };
+      });
+    } catch (err) {
+      return reply.code(400).send({
+        error: err instanceof Error ? err.message : String(err),
+        templates: [],
+      });
+    }
+  });
+
+  app.post<{ Params: { id: string } }>(
+    '/api/whatsapp/campaigns/:id/cancel',
+    async (request, reply) => {
+      try {
+        return await withTenant(request, async () => {
+          await completeCampaign(request.params.id);
+          return { ok: true };
+        });
+      } catch (err) {
+        return reply.code(400).send({
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+  );
+
+  app.post<{
+    Params: { id: string };
+    Body: { bodyParamsTemplate?: string[] };
+  }>('/api/whatsapp/campaigns/:id/resume', async (request, reply) => {
+    try {
+      return await withTenant(request, async () => {
+        const result = await resumeCampaign(
+          request.params.id,
+          request.body?.bodyParamsTemplate ?? ['{{name}}'],
+        );
+        return { ok: true, ...result };
+      });
+    } catch (err) {
+      return reply.code(400).send({
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 
   app.get<{ Params: { id: string } }>(
     '/api/whatsapp/campaigns/:id/failures',
-    async (request) => ({
-      failures: await listFailedCampaignTargets(request.params.id, 8),
-    }),
+    async (request, reply) => {
+      try {
+        return await withTenant(request, async () => ({
+          failures: await listFailedCampaignTargets(request.params.id, 8),
+        }));
+      } catch (err) {
+        return reply.code(500).send({
+          error: err instanceof Error ? err.message : 'Error al cargar fallos',
+          failures: [],
+        });
+      }
+    },
   );
 
   /** Prueba 1 envío de plantilla a un número (sin campaña masiva). */
@@ -159,14 +319,58 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
     if (!body.templateName) {
       return reply.code(400).send({ error: 'templateName requerido' });
     }
+    const templateName = body.templateName;
+    const templateLanguage = body.templateLanguage || 'es';
     try {
+      return await withTenant(request, async () => {
+      if (!(await isWhatsAppConfigured())) {
+        return reply.code(409).send({
+          error: 'WhatsApp no configurado. Ve a Ajustes → WhatsApp.',
+        });
+      }
+      // Valida que la plantilla exista en ESTA WABA antes de enviar.
+      const templates = await listMessageTemplates().catch(() => []);
+      const match = templates.find(
+        (t) =>
+          t.name === templateName &&
+          t.language === templateLanguage &&
+          t.status === 'APPROVED',
+      );
+      if (templates.length && !match) {
+        const available = templates
+          .map((t) => `${t.name}/${t.language}/${t.status}`)
+          .join(', ');
+        return reply.code(400).send({
+          error: `Plantilla no disponible en esta WABA. Pediste ${templateName}/${templateLanguage}. Disponibles: ${available || '(ninguna)'}`,
+        });
+      }
+
       const result = await sendTemplateMessage(
         to,
-        body.templateName,
-        body.templateLanguage || 'es',
+        templateName,
+        templateLanguage,
         body.bodyParams ?? [],
       );
+
+      const conversation = await getOrCreateConversation({
+        waId: to,
+        profileName: null,
+      });
+      const paramText = (body.bodyParams ?? []).filter(Boolean).join(' · ');
+      await saveMessage({
+        conversationId: conversation.id,
+        waMessageId: result.waMessageId,
+        direction: 'outbound',
+        senderType: 'human',
+        content: paramText
+          ? `[Plantilla ${templateName}] ${paramText}`
+          : `[Plantilla ${templateName}]`,
+        messageType: 'template',
+        templateName,
+      });
+
       return { ok: true, ...result };
+      });
     } catch (err) {
       return reply.code(400).send({
         error: err instanceof Error ? err.message : String(err),
@@ -183,17 +387,67 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
       bodyParamsTemplate?: string[];
       leadFilter?: CampaignLeadFilter;
       leadIds?: string[];
+      /** Si se envía, SOLO manda a este WhatsApp (prueba local). */
+      testTo?: string;
     };
   }>('/api/whatsapp/campaigns', async (request, reply) => {
     const body = request.body ?? {};
-    if (!body.name || !body.templateName) {
+    const name = body.name?.trim();
+    const templateName = body.templateName?.trim();
+    if (!name || !templateName) {
       return reply.code(400).send({ error: 'name y templateName son requeridos' });
     }
 
     try {
+      return await withTenant(request, async () => {
+      if (!(await isWhatsAppConfigured())) {
+        return reply.code(409).send({
+          error: 'WhatsApp no configurado. Ve a Ajustes → WhatsApp.',
+        });
+      }
+      // Bloquea campañas masivas con plantillas que no existen en esta WABA.
+      const templates = await listMessageTemplates().catch(() => []);
+      const lang = body.templateLanguage || 'es';
+      if (templates.length) {
+        const match = templates.find(
+          (t) => t.name === templateName && t.language === lang && t.status === 'APPROVED',
+        );
+        if (!match) {
+          const available = templates
+            .map((t) => `${t.name}/${t.language}/${t.status}`)
+            .join(', ');
+          return reply.code(400).send({
+            error: `Plantilla ${templateName}/${lang} no está APPROVED en esta WABA. Disponibles: ${available}`,
+          });
+        }
+      }
+
+      // Modo prueba: un solo número, sin tocar los 278 leads.
+      if (body.testTo) {
+        const to = String(body.testTo).replace(/\D/g, '');
+        const params = (body.bodyParamsTemplate ?? []).map((p) =>
+          p.replaceAll('{{name}}', 'Juan').replaceAll('{{sector}}', 'software').replaceAll('{{city}}', 'Cali'),
+        );
+        const result = await sendTemplateMessage(to, templateName, lang, params);
+        const conversation = await getOrCreateConversation({
+          waId: to,
+          profileName: null,
+        });
+        await saveMessage({
+          conversationId: conversation.id,
+          waMessageId: result.waMessageId,
+          direction: 'outbound',
+          senderType: 'human',
+          content: `[Plantilla ${templateName}] ${params.join(' · ')}`,
+          messageType: 'template',
+          templateName,
+        });
+        return { ok: true, mode: 'test', to, ...result };
+      }
+
       const result = await launchCampaign({
-        name: body.name,
-        templateName: body.templateName,
+        name,
+        templateName,
         templateLanguage: body.templateLanguage,
         appSlug: body.appSlug,
         bodyParamsTemplate: body.bodyParamsTemplate,
@@ -201,6 +455,7 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
         leadIds: body.leadIds,
       });
       return { ok: true, ...result };
+      });
     } catch (err) {
       return reply.code(400).send({
         error: err instanceof Error ? err.message : String(err),

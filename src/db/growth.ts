@@ -3,6 +3,17 @@ import { getMatuByteKnowledge } from '../knowledge/matubyte.js';
 import { pickCoverImage } from '../knowledge/blog-images.js';
 import { listRecentLeads } from './leads.js';
 import { withRetry } from '../utils/retry.js';
+import {
+  getTenant,
+  requireProjectId,
+  tenantInsertFields,
+  tryTenantInsertFields,
+} from '../tenancy/context.js';
+import { tryLoadCurrentProjectConfig } from '../tenancy/project-config.js';
+
+function scoped(table: string) {
+  return db.from(table).eq('project_id', requireProjectId());
+}
 
 function errMsg(error: unknown): string {
   if (typeof error === 'string') return error;
@@ -219,8 +230,9 @@ export async function seedAgentDefinitions(): Promise<void> {
   }
 }
 
-/** Ensures social-creator has at least one product card to write about. */
+/** Ensures social-creator has at least one product card (requires tenant context). */
 export async function seedDefaultAppConnection(): Promise<void> {
+  if (!getTenant()?.projectId) return;
   const apps = await listAppConnections().catch(() => []);
   if (apps.length > 0) return;
 
@@ -275,6 +287,7 @@ export async function saveChatMessage(input: {
     session_id: input.sessionId,
     role: input.role,
     content: input.content,
+    ...tryTenantInsertFields(),
   });
   if (error) throw new Error(`saveChatMessage: ${errMsg(error)}`);
 }
@@ -284,11 +297,14 @@ export async function listChatMessages(
   sessionId: string,
   limit = 40,
 ): Promise<Array<{ role: string; content: string; created_at: string }>> {
-  const { data, error } = await db
+  let q = db
     .from('agent_chat_messages')
     .select('role, content, created_at')
     .eq('agent_id', agentId)
-    .eq('session_id', sessionId)
+    .eq('session_id', sessionId);
+  const projectId = getTenant()?.projectId;
+  if (projectId) q = q.eq('project_id', projectId);
+  const { data, error } = await q
     .order('created_at', { ascending: true })
     .limit(limit);
 
@@ -300,8 +316,7 @@ export async function upsertOpportunity(row: OpportunityInsert): Promise<{
   action: 'inserted' | 'skipped_duplicate';
 }> {
   if (row.external_id) {
-    const { data, error } = await db
-      .from('opportunities')
+    const { data, error } = await scoped('opportunities')
       .select('id')
       .eq('source', row.source)
       .eq('external_id', row.external_id)
@@ -312,6 +327,7 @@ export async function upsertOpportunity(row: OpportunityInsert): Promise<{
 
   const { error } = await db.from('opportunities').insert({
     ...row,
+    ...tenantInsertFields(),
     needs_software: row.needs_software ?? true,
     status: 'new',
     country: row.country ?? 'CO',
@@ -321,8 +337,7 @@ export async function upsertOpportunity(row: OpportunityInsert): Promise<{
 }
 
 export async function listOpportunities(limit = 40): Promise<Record<string, unknown>[]> {
-  const { data, error } = await db
-    .from('opportunities')
+  const { data, error } = await scoped('opportunities')
     .select('*')
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -331,8 +346,7 @@ export async function listOpportunities(limit = 40): Promise<Record<string, unkn
 }
 
 export async function listAppConnections(): Promise<AppConnection[]> {
-  const { data, error } = await db
-    .from('app_connections')
+  const { data, error } = await scoped('app_connections')
     .select('*')
     .order('created_at', { ascending: false });
   if (error) throw new Error(`listAppConnections: ${errMsg(error)}`);
@@ -340,8 +354,7 @@ export async function listAppConnections(): Promise<AppConnection[]> {
 }
 
 export async function getAppBySlug(slug: string): Promise<AppConnection | null> {
-  const { data, error } = await db
-    .from('app_connections')
+  const { data, error } = await scoped('app_connections')
     .select('*')
     .eq('slug', slug)
     .limit(1);
@@ -374,6 +387,7 @@ export async function createAppConnection(input: {
     features: featuresJson,
     brand_voice: input.brand_voice ?? null,
     is_active: true,
+    ...tenantInsertFields(),
   });
   if (error) throw new Error(`createAppConnection: ${errMsg(error)}`);
   const row = (Array.isArray(data) ? data[0] : data) as AppConnection | undefined;
@@ -384,8 +398,7 @@ export async function createAppConnection(input: {
 export async function listSiteKnowledge(): Promise<
   Array<{ key: string; title: string; content: string; source_url: string | null }>
 > {
-  const { data, error } = await db
-    .from('site_knowledge')
+  const { data, error } = await scoped('site_knowledge')
     .select('key, title, content, source_url')
     .eq('is_active', true);
   if (error) throw new Error(`listSiteKnowledge: ${errMsg(error)}`);
@@ -403,8 +416,7 @@ export async function upsertSiteKnowledge(input: {
   content: string;
   source_url?: string;
 }): Promise<void> {
-  const existing = await db
-    .from('site_knowledge')
+  const existing = await scoped('site_knowledge')
     .select('id')
     .eq('key', input.key)
     .limit(1);
@@ -432,18 +444,22 @@ export async function upsertSiteKnowledge(input: {
     content: input.content,
     source_url: input.source_url ?? null,
     is_active: true,
+    ...tenantInsertFields(),
   });
   if (error) throw new Error(`upsertSiteKnowledge insert: ${errMsg(error)}`);
 }
 
 export async function buildKnowledgeContext(): Promise<string> {
-  const fileKnowledge = getMatuByteKnowledge();
+  const projectCfg = await tryLoadCurrentProjectConfig().catch(() => null);
+  const fileKnowledge =
+    projectCfg?.brandKnowledge?.trim() || getMatuByteKnowledge();
   const rows = await listSiteKnowledge().catch(() => []);
   const dbBlock = rows
     .map((row) => `### ${row.title} (${row.key})\n${row.content}`)
     .join('\n\n');
 
-  return `${fileKnowledge}\n\n## Knowledge DB\n${dbBlock || '(vacío — carga /api/knowledge)'}`;
+  const brand = projectCfg?.brandName ? `# ${projectCfg.brandName}\n\n` : '';
+  return `${brand}${fileKnowledge}\n\n## Knowledge DB\n${dbBlock || '(vacío — carga /api/knowledge)'}`;
 }
 
 export async function insertContentScript(input: {
@@ -478,6 +494,7 @@ export async function insertContentScript(input: {
       trend_source: input.trend_source ?? null,
       trend_url: input.trend_url ?? null,
       publish_status: input.publish_status ?? 'draft',
+      ...tenantInsertFields(),
     }),
   );
   if (error) throw new Error(`insertContentScript: ${errMsg(error)}`);
@@ -565,11 +582,10 @@ const DEFAULT_FB_SETTINGS: FacebookPublisherSettings = {
 export async function getBotSetting<T = Record<string, unknown>>(
   key: string,
 ): Promise<T | null> {
-  const { data, error } = await db
-    .from('bot_settings')
-    .select('value')
-    .eq('key', key)
-    .limit(1);
+  let q = db.from('bot_settings').select('value').eq('key', key);
+  const projectId = getTenant()?.projectId;
+  if (projectId) q = q.eq('project_id', projectId);
+  const { data, error } = await q.limit(1);
   if (error) throw new Error(`getBotSetting: ${errMsg(error)}`);
   const row = (data ?? [])[0] as { value?: T } | undefined;
   return row?.value ?? null;
@@ -579,18 +595,19 @@ export async function upsertBotSetting(
   key: string,
   value: Record<string, unknown>,
 ): Promise<void> {
-  const existing = await db
-    .from('bot_settings')
-    .select('key')
-    .eq('key', key)
-    .limit(1);
+  const projectId = getTenant()?.projectId;
+  let findQ = db.from('bot_settings').select('key').eq('key', key);
+  if (projectId) findQ = findQ.eq('project_id', projectId);
+  const existing = await findQ.limit(1);
   if (existing.error) throw new Error(`upsertBotSetting find: ${errMsg(existing.error)}`);
   const row = (existing.data ?? [])[0];
   if (row) {
-    const { error } = await db
-      .from('bot_settings')
-      .eq('key', key)
-      .update({ value, updated_at: new Date().toISOString() });
+    let upd = db.from('bot_settings').eq('key', key);
+    if (projectId) upd = upd.eq('project_id', projectId);
+    const { error } = await upd.update({
+      value,
+      updated_at: new Date().toISOString(),
+    });
     if (error) throw new Error(`upsertBotSetting update: ${errMsg(error)}`);
     return;
   }
@@ -598,6 +615,7 @@ export async function upsertBotSetting(
     key,
     value,
     updated_at: new Date().toISOString(),
+    ...tryTenantInsertFields(),
   });
   if (error) throw new Error(`upsertBotSetting insert: ${errMsg(error)}`);
 }
@@ -619,8 +637,7 @@ export async function listFacebookPosts(opts?: {
   limit?: number;
 }): Promise<Record<string, unknown>[]> {
   const limit = Math.min(100, Math.max(1, opts?.limit ?? 30));
-  let q = db
-    .from('content_scripts')
+  let q = scoped('content_scripts')
     .select('*')
     .eq('platform', 'facebook')
     .order('created_at', { ascending: false })
@@ -639,8 +656,7 @@ export async function listFacebookPosts(opts?: {
  */
 export async function listRecentTrendUrls(daysBack = 7): Promise<string[]> {
   const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
-  const { data, error } = await db
-    .from('content_scripts')
+  const { data, error } = await scoped('content_scripts')
     .select('trend_url')
     .eq('platform', 'facebook')
     .not('trend_url', 'is', null)
@@ -654,8 +670,7 @@ export async function listRecentTrendUrls(daysBack = 7): Promise<string[]> {
 export async function listFailedFbPosts(limit = 20): Promise<
   Array<Record<string, unknown>>
 > {
-  const { data, error } = await db
-    .from('content_scripts')
+  const { data, error } = await scoped('content_scripts')
     .select('*')
     .eq('platform', 'facebook')
     .eq('publish_status', 'failed')
@@ -712,14 +727,14 @@ export async function insertBlogPost(input: {
       cover_image_alt: cover.alt,
       status,
       published_at: status === 'published' ? new Date().toISOString() : null,
+      ...tenantInsertFields(),
     }),
   );
   if (error) throw new Error(`insertBlogPost: ${errMsg(error)}`);
 }
 
 export async function listBlogPosts(limit = 20): Promise<Record<string, unknown>[]> {
-  const { data, error } = await db
-    .from('blog_posts')
+  const { data, error } = await scoped('blog_posts')
     .select('*')
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -728,8 +743,7 @@ export async function listBlogPosts(limit = 20): Promise<Record<string, unknown>
 }
 
 export async function listContentScripts(limit = 20): Promise<Record<string, unknown>[]> {
-  const { data, error } = await db
-    .from('content_scripts')
+  const { data, error } = await scoped('content_scripts')
     .select('*')
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -777,14 +791,14 @@ export async function insertContentBrief(input: {
       priority: input.priority ?? 50,
       status: 'pending',
       metadata: input.metadata ?? {},
+      ...tenantInsertFields(),
     }),
   );
   if (error) throw new Error(`insertContentBrief: ${errMsg(error)}`);
 }
 
 export async function claimNextContentBrief(): Promise<ContentBrief | null> {
-  const { data, error } = await db
-    .from('content_briefs')
+  const { data, error } = await scoped('content_briefs')
     .select('*')
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
@@ -824,8 +838,7 @@ export async function completeContentBrief(
 }
 
 export async function listPendingBriefs(limit = 20): Promise<ContentBrief[]> {
-  const { data, error } = await db
-    .from('content_briefs')
+  const { data, error } = await scoped('content_briefs')
     .select('*')
     .eq('status', 'pending')
     .order('priority', { ascending: false })

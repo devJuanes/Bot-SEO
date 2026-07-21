@@ -364,7 +364,7 @@ VALUES (
     'mode', 'manual',
     'auto_publish', false,
     'default_hashtags', jsonb_build_array('#MatuByte', '#Software', '#Colombia'),
-    'notes', 'manual = requiere Aprobar en /facebook.html; auto = publica al generar'
+    'notes', 'manual = requiere Aprobar en /facebook.html — auto = publica al generar'
   )
 )
 ON CONFLICT (key) DO NOTHING;

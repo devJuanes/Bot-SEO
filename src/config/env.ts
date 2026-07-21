@@ -40,6 +40,17 @@ const envSchema = z.object({
   MATUDB_API_KEY: z.string().min(1, 'MATUDB_API_KEY is required'),
   MATUDB_SERVICE_KEY: z.string().min(1).optional(),
 
+  /** HMAC secret for session JWTs (SaaS auth). */
+  AUTH_JWT_SECRET: z
+    .string()
+    .min(16, 'AUTH_JWT_SECRET must be at least 16 characters')
+    .default('dev-change-me-auth-jwt-secret'),
+  /** AES key material for project_secrets encryption. */
+  SECRETS_MASTER_KEY: z
+    .string()
+    .min(16, 'SECRETS_MASTER_KEY must be at least 16 characters')
+    .default('dev-change-me-secrets-master'),
+
   // 'api' se mantiene como alias histórico; en runtime siempre es MiniMax.
   LLM_PROVIDER: z
     .enum(['minimax', 'api'])
@@ -72,11 +83,19 @@ const envSchema = z.object({
   WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().optional().or(z.literal('')),
   WHATSAPP_VERIFY_TOKEN: z.string().min(1).default('matubyte_verify_token'),
   META_APP_SECRET: z.string().optional().or(z.literal('')),
+  /** Opcional — mejora la detección automática del WABA vía debug_token. */
+  META_APP_ID: z.string().optional().or(z.literal('')),
   WHATSAPP_API_VERSION: z.string().min(1).default('v21.0'),
   WHATSAPP_HANDOFF_KEYWORDS: z
     .string()
     .min(1)
-    .default('hablar con alguien,agente humano,asesor,hablar con una persona,humano por favor'),
+    // Frases completas (el bot hace match por palabra/frase, no substring suelto).
+    // Evitar palabras cortas como "asesor" / "propuesta" sueltas: disparan bucles con otros bots.
+    .default(
+      'hablar con alguien,agente humano,hablar con una persona,humano por favor,quiero un asesor,pasar con un asesor,hablar con un asesor,quiero cotizar',
+    ),
+  /** Tu número personal (E.164 sin +) para avisar cuando un cliente pide asesor/propuesta. Ej: 573001112233 */
+  WHATSAPP_OWNER_PHONE: z.string().optional().or(z.literal('')),
 
   // Facebook Pages API (Meta Graph) — agente facebook-publisher
   // Documentación: https://developers.facebook.com/docs/pages-api
@@ -120,10 +139,18 @@ export type Env = z.infer<typeof envSchema> & {
   WHATSAPP_ACCESS_TOKEN?: string;
   WHATSAPP_PHONE_NUMBER_ID?: string;
   WHATSAPP_BUSINESS_ACCOUNT_ID?: string;
+  WHATSAPP_OWNER_PHONE?: string;
   META_APP_SECRET?: string;
+  META_APP_ID?: string;
   FB_PAGE_ID?: string;
   FB_PAGE_ACCESS_TOKEN?: string;
 };
+
+function normalizeOwnerPhone(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const digits = value.replace(/\D/g, '');
+  return digits || undefined;
+}
 
 function loadEnv(): Env {
   if (!process.env.LLM_PROVIDER) {
@@ -163,7 +190,9 @@ function loadEnv(): Env {
     WHATSAPP_ACCESS_TOKEN: parsed.data.WHATSAPP_ACCESS_TOKEN || undefined,
     WHATSAPP_PHONE_NUMBER_ID: parsed.data.WHATSAPP_PHONE_NUMBER_ID || undefined,
     WHATSAPP_BUSINESS_ACCOUNT_ID: parsed.data.WHATSAPP_BUSINESS_ACCOUNT_ID || undefined,
+    WHATSAPP_OWNER_PHONE: normalizeOwnerPhone(parsed.data.WHATSAPP_OWNER_PHONE),
     META_APP_SECRET: parsed.data.META_APP_SECRET || undefined,
+    META_APP_ID: parsed.data.META_APP_ID || undefined,
     FB_PAGE_ID: parsed.data.FB_PAGE_ID || undefined,
     FB_PAGE_ACCESS_TOKEN: parsed.data.FB_PAGE_ACCESS_TOKEN || undefined,
   };

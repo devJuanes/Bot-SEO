@@ -5,7 +5,6 @@ export interface MapsScrapeOptions {
   query: string;
   city: string;
   sector?: string;
-  maxResults: number;
   headless?: boolean;
 }
 
@@ -92,14 +91,14 @@ async function dismissConsent(page: Page): Promise<void> {
   }
 }
 
-async function collectResultHrefs(page: Page, maxResults: number): Promise<string[]> {
+async function collectResultHrefs(page: Page): Promise<string[]> {
   const feed = page.locator('div[role="feed"]').first();
   await feed.waitFor({ state: 'visible', timeout: 30000 });
 
   const hrefs = new Set<string>();
   let stagnantRounds = 0;
 
-  while (hrefs.size < maxResults && stagnantRounds < 4) {
+  while (stagnantRounds < 6) {
     const before = hrefs.size;
     const links = page.locator('div[role="feed"] a[href*="/maps/place/"]');
     const count = await links.count();
@@ -111,7 +110,6 @@ async function collectResultHrefs(page: Page, maxResults: number): Promise<strin
         ? href
         : `https://www.google.com${href}`;
       hrefs.add(absolute.split('&')[0] ?? absolute);
-      if (hrefs.size >= maxResults) break;
     }
 
     if (hrefs.size === before) {
@@ -121,12 +119,12 @@ async function collectResultHrefs(page: Page, maxResults: number): Promise<strin
     }
 
     await feed.evaluate((node) => {
-      node.scrollBy(0, 900);
+      (node as unknown as { scrollBy: (x: number, y: number) => void }).scrollBy(0, 900);
     });
     await sleep(700);
   }
 
-  return [...hrefs].slice(0, maxResults);
+  return [...hrefs];
 }
 
 async function readPlaceDetails(page: Page, mapsUrl: string): Promise<MapsPlace | null> {
@@ -233,7 +231,7 @@ export async function scrapeGoogleMapsPlaces(
     await dismissConsent(session.page);
     await sleep(2000);
 
-    const hrefs = await collectResultHrefs(session.page, options.maxResults);
+    const hrefs = await collectResultHrefs(session.page);
 
     for (const href of hrefs) {
       try {

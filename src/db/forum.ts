@@ -1,4 +1,5 @@
 import { db } from './matu.js';
+import { requireProjectId, tenantInsertFields } from '../tenancy/context.js';
 
 function errMsg(error: unknown): string {
   if (typeof error === 'string') return error;
@@ -51,6 +52,7 @@ export async function createForumThread(input: {
   agentId?: string;
 }): Promise<ForumThread> {
   const slug = `${slugify(input.title)}-${Date.now().toString(36)}`;
+  const tenant = tenantInsertFields();
 
   const { data, error } = await db.from('forum_threads').insert({
     title: input.title,
@@ -59,6 +61,7 @@ export async function createForumThread(input: {
     created_by: input.createdBy ?? 'community',
     author_name: input.authorName ?? 'Anónimo',
     status: 'open',
+    ...tenant,
   });
   if (error) throw new Error(`createForumThread: ${errMsg(error)}`);
 
@@ -72,6 +75,7 @@ export async function createForumThread(input: {
     agent_id: input.agentId ?? null,
     content: input.content,
     status: 'published',
+    ...tenant,
   });
   if (postError) throw new Error(`createForumThread first post: ${errMsg(postError)}`);
 
@@ -92,6 +96,7 @@ export async function createForumPost(input: {
     agent_id: input.agentId ?? null,
     content: input.content,
     status: 'published',
+    ...tenantInsertFields(),
   });
   if (error) throw new Error(`createForumPost: ${errMsg(error)}`);
 
@@ -109,6 +114,7 @@ export async function listRecentForumThreads(limit = 20): Promise<ForumThread[]>
   const { data, error } = await db
     .from('forum_threads')
     .select('*')
+    .eq('project_id', requireProjectId())
     .eq('status', 'open')
     .order('updated_at', { ascending: false })
     .limit(limit);

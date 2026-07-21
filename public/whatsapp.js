@@ -3,6 +3,8 @@ const campaignsList = document.getElementById('campaignsList');
 const newCampaignBtn = document.getElementById('newCampaignBtn');
 const campaignForm = document.getElementById('campaignForm');
 const campaignFormEl = document.getElementById('campaignFormEl');
+const testFormEl = document.getElementById('testFormEl');
+const templatesHint = document.getElementById('templatesHint');
 const waStatusPill = document.getElementById('waStatusPill');
 
 function esc(value) {
@@ -30,6 +32,27 @@ async function loadStatus() {
   waStatusPill.classList.toggle('on', data.configured);
 }
 
+async function loadTemplates() {
+  try {
+    const res = await fetch('/api/whatsapp/templates');
+    const data = await res.json();
+    if (!res.ok) {
+      templatesHint.textContent = data.error || 'No se pudieron cargar plantillas';
+      return;
+    }
+    const templates = data.templates || [];
+    if (!templates.length) {
+      templatesHint.textContent = 'No hay plantillas en esta WABA.';
+      return;
+    }
+    templatesHint.innerHTML = `Plantillas en ESTA cuenta: ${templates
+      .map((t) => `<code>${esc(t.name)}/${esc(t.language)}</code> <span class="badge">${esc(t.status)}</span>`)
+      .join(' · ')}`;
+  } catch (err) {
+    templatesHint.textContent = `Error: ${err instanceof Error ? err.message : String(err)}`;
+  }
+}
+
 async function loadConversations() {
   const res = await fetch('/api/whatsapp/conversations');
   const data = await res.json();
@@ -45,7 +68,7 @@ async function loadConversations() {
     .map((c) => {
       const unread = c.unread_count > 0 ? `<span class="badge">${esc(c.unread_count)}</span>` : '';
       return `
-        <a class="lead-row" href="/whatsapp-thread.html?id=${encodeURIComponent(c.id)}" style="text-decoration:none;color:inherit;display:grid">
+        <a class="lead-row" href="/wa.html?id=${encodeURIComponent(c.id)}" style="text-decoration:none;color:inherit;display:grid">
           <span>${esc(c.profile_name || c.wa_id)} ${unread}</span>
           <span>${esc(c.wa_id)}</span>
           <span class="badge" style="border-color:${c.mode === 'human' ? 'var(--magenta)' : 'var(--cyan)'};color:${c.mode === 'human' ? 'var(--magenta)' : 'var(--cyan)'}">${esc(c.mode).toUpperCase()}</span>
@@ -68,7 +91,7 @@ async function showCampaignFailures(campaignId, campaignName) {
     const lines = failures
       .map((f) => `• ${f.wa_id}: ${f.error || 'sin mensaje'}`)
       .join('\n');
-    alert(`Errores de "${campaignName}" (muestra):\n\n${lines}\n\nSi dice language/template: el idioma debe coincidir con Meta (prueba en o es).`);
+    alert(`Errores de "${campaignName}" (muestra):\n\n${lines}`);
   } catch (err) {
     alert(`No se pudieron cargar errores: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -87,12 +110,19 @@ async function loadCampaigns() {
   campaignsList.innerHTML = campaigns
     .map(
       (c) => `
-      <button type="button" class="lead-row" data-campaign-id="${esc(c.id)}" data-campaign-name="${esc(c.name)}" style="width:100%;text-align:left;cursor:pointer;background:transparent;border:0;color:inherit;font:inherit;display:grid">
-        <span>${esc(c.name)}</span>
-        <span>${esc(c.template_name)} · lang ${esc(c.template_language)}</span>
-        <span class="badge">${esc(c.status)}</span>
-        <span>${esc(c.sent_count)}/${esc(c.total_targets)} · fail ${esc(c.failed_count)}</span>
-      </button>`,
+      <div class="lead-row" style="display:grid">
+        <button type="button" data-campaign-id="${esc(c.id)}" data-campaign-name="${esc(c.name)}" style="width:100%;text-align:left;cursor:pointer;background:transparent;border:0;color:inherit;font:inherit;display:grid">
+          <span>${esc(c.name)}</span>
+          <span>${esc(c.template_name)} · lang ${esc(c.template_language)}</span>
+          <span class="badge">${esc(c.status)}</span>
+          <span>${esc(c.sent_count)}/${esc(c.total_targets)} · fail ${esc(c.failed_count)}</span>
+        </button>
+        ${
+          c.status === 'sending'
+            ? `<button type="button" class="btn" data-cancel-id="${esc(c.id)}" style="margin-top:0.35rem">CANCELAR</button>`
+            : ''
+        }
+      </div>`,
     )
     .join('');
 
@@ -101,11 +131,49 @@ async function loadCampaigns() {
       showCampaignFailures(btn.getAttribute('data-campaign-id'), btn.getAttribute('data-campaign-name'));
     });
   });
+  campaignsList.querySelectorAll('[data-cancel-id]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-cancel-id');
+      await fetch(`/api/whatsapp/campaigns/${encodeURIComponent(id)}/cancel`, { method: 'POST' });
+      await loadCampaigns();
+    });
+  });
 }
 
 newCampaignBtn?.addEventListener('click', () => {
   if (!campaignForm) return;
   campaignForm.style.display = campaignForm.style.display === 'none' ? 'block' : 'none';
+});
+
+testFormEl?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  if (!(form instanceof HTMLFormElement)) return;
+  const formData = new FormData(form);
+  const bodyParams = String(formData.get('bodyParams') || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const payload = {
+    to: formData.get('to'),
+    templateName: formData.get('templateName'),
+    templateLanguage: formData.get('templateLanguage') || 'es',
+    bodyParams,
+  };
+
+  const res = await fetch('/api/whatsapp/templates/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    alert(data.error || `Error ${res.status}`);
+    return;
+  }
+  alert(`Prueba enviada a ${payload.to}\nwaMessageId: ${data.waMessageId || 'ok'}\nRevisa WhatsApp.`);
+  await loadConversations();
 });
 
 campaignFormEl?.addEventListener('submit', async (event) => {
@@ -126,6 +194,11 @@ campaignFormEl?.addEventListener('submit', async (event) => {
   if (city) leadFilter.city = city;
 
   const lang = String(formData.get('templateLanguage') || 'es').trim() || 'es';
+
+  const ok = confirm(
+    'Esto enviará a TODOS los leads filtrados.\n¿Ya probaste con ENVIAR PRUEBA a tu número?',
+  );
+  if (!ok) return;
 
   const payload = {
     name: formData.get('name'),
@@ -148,19 +221,20 @@ campaignFormEl?.addEventListener('submit', async (event) => {
     return;
   }
 
-  alert(`Campaña lanzada: ${data.totalTargets} destinatarios\nIdioma: ${lang}\nParams: ${bodyParams.join(', ') || '(ninguno)'}`);
+  alert(`Campaña lanzada: ${data.totalTargets} destinatarios\nIdioma: ${lang}`);
   if (campaignForm) campaignForm.style.display = 'none';
   form.reset();
-  // Restaurar idioma sugerido tras reset
   const langInput = form.querySelector('[name="templateLanguage"]');
-  if (langInput instanceof HTMLInputElement) langInput.value = 'en';
+  if (langInput instanceof HTMLInputElement) langInput.value = 'es';
   const paramsInput = form.querySelector('[name="bodyParams"]');
   if (paramsInput instanceof HTMLInputElement) paramsInput.value = '{{name}}';
+  const nameInput = form.querySelector('[name="templateName"]');
+  if (nameInput instanceof HTMLInputElement) nameInput.value = 'contacto_cliente';
   await loadCampaigns();
 });
 
 async function refreshAll() {
-  await Promise.all([loadStatus(), loadConversations(), loadCampaigns()]);
+  await Promise.all([loadStatus(), loadTemplates(), loadConversations(), loadCampaigns()]);
 }
 
 await refreshAll();

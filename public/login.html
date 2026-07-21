@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Growth OS · Login</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=VT323&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      .auth-wrap {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+      }
+      .auth-card {
+        width: min(420px, 100%);
+        padding: 1.5rem;
+      }
+      .auth-card h1 {
+        font-family: Orbitron, sans-serif;
+        font-size: 1.4rem;
+        margin: 0 0 0.35rem;
+      }
+      .auth-card p {
+        font-family: VT323, monospace;
+        opacity: 0.85;
+        margin: 0 0 1.25rem;
+      }
+      .auth-card label {
+        display: block;
+        font-family: VT323, monospace;
+        margin: 0.75rem 0 0.25rem;
+      }
+      .auth-card input {
+        width: 100%;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+        background: rgba(0, 0, 0, 0.35);
+        color: inherit;
+        font-family: VT323, monospace;
+        font-size: 1.1rem;
+      }
+      .auth-card .row {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1.25rem;
+      }
+      .auth-card .err {
+        color: #ff8a8a;
+        font-family: VT323, monospace;
+        min-height: 1.2rem;
+        margin-top: 0.75rem;
+      }
+      .tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+      .tabs button {
+        flex: 1;
+      }
+      .tabs button.active {
+        outline: 1px solid #7dffb3;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stars" aria-hidden="true"></div>
+    <div class="scanlines" aria-hidden="true"></div>
+    <div class="auth-wrap">
+      <div class="auth-card chrome panel">
+        <h1>GROWTH OS</h1>
+        <p>SaaS multi-proyecto · entra o crea tu organización</p>
+        <div class="tabs">
+          <button type="button" class="btn active" id="tabLogin">Login</button>
+          <button type="button" class="btn" id="tabRegister">Registro</button>
+        </div>
+        <form id="authForm">
+          <div id="nameField" hidden>
+            <label for="name">Nombre</label>
+            <input id="name" name="name" autocomplete="name" />
+          </div>
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required autocomplete="username" />
+          <label for="password">Password</label>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            required
+            minlength="8"
+            autocomplete="current-password"
+          />
+          <div id="orgField" hidden>
+            <label for="org">Organización</label>
+            <input id="org" name="org" placeholder="Mi empresa" />
+          </div>
+          <div class="err" id="err"></div>
+          <div class="row">
+            <button class="btn" type="submit" id="submitBtn">Entrar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <script src="/saas-auth.js"></script>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const next = params.get('next') || '/';
+      let mode = 'login';
+
+      const tabLogin = document.getElementById('tabLogin');
+      const tabRegister = document.getElementById('tabRegister');
+      const nameField = document.getElementById('nameField');
+      const orgField = document.getElementById('orgField');
+      const submitBtn = document.getElementById('submitBtn');
+      const errEl = document.getElementById('err');
+
+      function setMode(m) {
+        mode = m;
+        tabLogin.classList.toggle('active', m === 'login');
+        tabRegister.classList.toggle('active', m === 'register');
+        nameField.hidden = m !== 'register';
+        orgField.hidden = m !== 'register';
+        submitBtn.textContent = m === 'login' ? 'Entrar' : 'Crear cuenta';
+        errEl.textContent = '';
+      }
+      tabLogin.onclick = () => setMode('login');
+      tabRegister.onclick = () => setMode('register');
+
+      if (GrowthAuth.getToken()) {
+        location.href = next;
+      }
+
+      document.getElementById('authForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errEl.textContent = '';
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        const body =
+          mode === 'login'
+            ? { email, password }
+            : {
+                email,
+                password,
+                name: document.getElementById('name').value.trim() || email,
+                organizationName:
+                  document.getElementById('org').value.trim() || undefined,
+              };
+        try {
+          const res = await fetch(
+            mode === 'login' ? '/api/auth/login' : '/api/auth/register',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            },
+          );
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Error');
+          const projectId =
+            data.project?.id ||
+            (data.projects && data.projects[0] && data.projects[0].id) ||
+            null;
+          const orgId =
+            data.organization?.id ||
+            (data.organizations && data.organizations[0] && data.organizations[0].id) ||
+            null;
+          GrowthAuth.setSession(data.token, projectId, orgId);
+          location.href = next;
+        } catch (err) {
+          errEl.textContent = err.message || String(err);
+        }
+      });
+    </script>
+  </body>
+</html>

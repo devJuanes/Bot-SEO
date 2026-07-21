@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WhatsApp MatuByte</title>
+    <link rel="stylesheet" href="/wa-web.css" />
+  </head>
+  <body>
+    <div class="wa-app" id="waApp">
+      <aside class="wa-sidebar">
+        <div class="wa-side-head">
+          <div class="wa-brand">
+            <strong>WhatsApp</strong>
+            <span id="waStatus">MatuByte Business</span>
+          </div>
+          <div class="wa-side-actions">
+            <button class="wa-icon-btn" id="refreshBtn" title="Actualizar">↻</button>
+          </div>
+        </div>
+        <div class="wa-search-wrap">
+          <input
+            id="searchInput"
+            class="wa-search"
+            type="search"
+            placeholder="Buscar un chat o número"
+            autocomplete="off"
+          />
+        </div>
+        <div class="wa-list" id="chatList">
+          <div class="wa-empty">Cargando conversaciones…</div>
+        </div>
+        <div class="wa-link-camp">
+          Campañas y plantillas → <a href="/whatsapp.html">abrir cockpit</a>
+        </div>
+      </aside>
+
+      <section class="wa-chat" id="chatPanel">
+        <div class="wa-chat-empty" id="emptyState">
+          <div>
+            <h1>MatuByte WhatsApp</h1>
+            <p>Selecciona un chat a la izquierda para hablar como en WhatsApp Web.</p>
+          </div>
+        </div>
+
+        <div id="activeChat" hidden>
+          <header class="wa-chat-head">
+            <button class="wa-icon-btn" id="backBtn" title="Volver" style="display: none">←</button>
+            <div class="wa-avatar sm" id="chatAvatar">M</div>
+            <div class="wa-chat-meta">
+              <strong id="chatTitle">—</strong>
+              <span class="wa-chat-biz" id="chatBiz" hidden></span>
+              <span id="chatSubtitle">—</span>
+            </div>
+            <div class="wa-head-actions">
+              <span class="wa-mode-chip" id="modeChip">BOT</span>
+              <button class="wa-btn" id="toggleModeBtn">Tomar control</button>
+            </div>
+          </header>
+
+          <div class="wa-messages" id="messages"></div>
+
+          <form class="wa-compose" id="composeForm">
+            <textarea
+              id="composeInput"
+              rows="1"
+              placeholder="Escribe un mensaje"
+              autocomplete="off"
+            ></textarea>
+            <button type="submit" id="sendBtn" title="Enviar">➤</button>
+          </form>
+        </div>
+      </section>
+    </div>
+
+    <script src="/saas-auth.js"></script>
+    <script>
+      if (GrowthAuth.requireAuthOrRedirect()) {
+        GrowthAuth.loadMe().catch(() => {});
+      }
+    </script>
+    <script src="/wa-web.js" type="module"></script>
+  </body>
+</html>

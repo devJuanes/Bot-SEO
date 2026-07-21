@@ -2,7 +2,7 @@ import cron, { type ScheduledTask } from 'node-cron';
 import type { FastifyBaseLogger } from 'fastify';
 import { env } from '../config/env.js';
 import type { AgentId } from '../agents/types.js';
-import { executeAgent } from '../runtime/orchestrator.js';
+import { executeAgentAcrossProjects } from '../runtime/orchestrator.js';
 
 interface ScheduledJob {
   agentId: AgentId;
@@ -34,10 +34,10 @@ export function startScheduler(log: FastifyBaseLogger): void {
     }
 
     const task = cron.schedule(entry.expression, async () => {
-      log.info({ agentId: entry.agentId }, 'Cron triggered agent run');
+      log.info({ agentId: entry.agentId }, 'Cron triggered agent run (all projects)');
       try {
-        const { result } = await executeAgent(entry.agentId, log, 'cron');
-        log.info({ agentId: entry.agentId, result }, 'Cron agent run finished');
+        const results = await executeAgentAcrossProjects(entry.agentId, log, 'cron');
+        log.info({ agentId: entry.agentId, results }, 'Cron agent run finished');
       } catch (err) {
         log.error({ agentId: entry.agentId, err }, 'Cron agent run failed');
       }

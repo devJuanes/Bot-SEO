@@ -10,7 +10,6 @@ function resolveHunterParams(ctx: AgentContext): {
   sector?: string;
   country: string;
   countryCode: string;
-  maxResults: number;
 } {
   const params = ctx.params ?? {};
   const city =
@@ -28,10 +27,6 @@ function resolveHunterParams(ctx: AgentContext): {
     (typeof params.query === 'string' && params.query) ||
     ctx.env.LEAD_HUNTER_QUERY ||
     (sector ? `${sector} ${city} ${country}` : `negocios ${city} ${country}`);
-  const maxResultsRaw =
-    typeof params.maxResults === 'number'
-      ? params.maxResults
-      : ctx.env.LEAD_HUNTER_MAX_RESULTS;
 
   return {
     query,
@@ -39,7 +34,6 @@ function resolveHunterParams(ctx: AgentContext): {
     sector,
     country,
     countryCode,
-    maxResults: Math.min(Math.max(maxResultsRaw, 1), 40),
   };
 }
 
@@ -51,7 +45,7 @@ export const leadHunterAgent: Agent = {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const startedAt = new Date().toISOString();
     const brand = getMatuByteSummary();
-    const { query, city, sector, country, countryCode, maxResults } =
+    const { query, city, sector, country, countryCode } =
       resolveHunterParams(ctx);
 
     pushLog({
@@ -62,7 +56,7 @@ export const leadHunterAgent: Agent = {
     });
 
     ctx.log.info(
-      { agent: this.id, query, city, sector, country, maxResults },
+      { agent: this.id, query, city, sector, country },
       'Lead hunter starting Google Maps scan',
     );
 
@@ -71,7 +65,6 @@ export const leadHunterAgent: Agent = {
         query,
         city,
         sector,
-        maxResults,
         headless: ctx.env.HEADLESS_MODE,
       });
 

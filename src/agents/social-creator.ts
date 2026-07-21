@@ -36,11 +36,10 @@ export const socialCreatorAgent: Agent = {
     const appSlug =
       typeof ctx.params?.appSlug === 'string' ? ctx.params.appSlug : undefined;
 
-    if (!isLlmConfigured() || envLooksFake(ctx.env.LLM_API_KEY)) {
+    if (!(await isLlmConfigured())) {
       return {
         status: 'error',
-        reason:
-          'LLM_API_KEY inválida. Configura una API key real en .env (ver docs/CONFIGURACION.md)',
+        reason: 'LLM no configurado para este proyecto',
       };
     }
 
@@ -152,10 +151,6 @@ Devuelve JSON:
     }
   },
 };
-
-function envLooksFake(key: string): boolean {
-  return /smoke|replace_me|changeme|xxx/i.test(key);
-}
 
 function extractJson(text: string): Record<string, unknown> {
   const match = text.match(/\{[\s\S]*\}/);

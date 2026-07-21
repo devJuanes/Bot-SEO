@@ -1,6 +1,7 @@
 import {
   addCampaignTargets,
   completeCampaign,
+  countCampaignTargetsByStatus,
   createCampaign,
   getOrCreateConversation,
   listCampaigns,
@@ -21,7 +22,7 @@ export interface CampaignLeadFilter {
 async function resolveTargets(filter?: CampaignLeadFilter): Promise<
   Array<{ leadId: string; waId: string; name: string; sector: string | null; city: string | null }>
 > {
-  const leads = await listRecentLeads(300);
+  const leads = await listRecentLeads(500);
 
   return leads
     .filter((lead) => Boolean(lead.phone))
@@ -98,57 +99,116 @@ export async function launchCampaign(input: {
   return { campaignId: campaign.id, totalTargets: targets.length };
 }
 
+/** Reanuda envíos pendientes de una campaña (p.ej. si se cortó por el limit 50). */
+export async function resumeCampaign(
+  campaignId: string,
+  bodyParamsTemplate: string[] = ['{{name}}'],
+): Promise<{ pending: number; campaignId: string }> {
+  const campaigns = await listCampaigns(100);
+  const campaign = campaigns.find((c) => c.id === campaignId);
+  if (!campaign) throw new Error(`Campaign ${campaignId} not found`);
+
+  const counts = await countCampaignTargetsByStatus(campaignId);
+  if (counts.pending === 0) {
+    await completeCampaign(campaignId);
+    return { pending: 0, campaignId };
+  }
+
+  await dbSetSending(campaignId);
+
+  const leads = await listRecentLeads(500);
+  const targets = leads
+    .filter((lead) => Boolean(lead.phone))
+    .map((lead) => ({
+      leadId: lead.id,
+      waId: (lead.phone ?? '').replace(/\D/g, ''),
+      name: lead.name,
+      sector: lead.business_type,
+      city: lead.city,
+    }))
+    .filter((t) => t.waId.length >= 10);
+
+  pushLog({
+    level: 'info',
+    agentId: 'whatsapp-campaign',
+    message: `Reanudando campaña ${campaign.name}: ${counts.pending} pendientes`,
+  });
+
+  void runCampaignLoop(campaignId, targets, bodyParamsTemplate);
+  return { pending: counts.pending, campaignId };
+}
+
+async function dbSetSending(campaignId: string): Promise<void> {
+  const { db } = await import('../db/matu.js');
+  await db
+    .from('whatsapp_campaigns')
+    .eq('id', campaignId)
+    .update({ status: 'sending', updated_at: new Date().toISOString() });
+}
+
 async function runCampaignLoop(
   campaignId: string,
   targets: Array<{ leadId: string; waId: string; name: string; sector: string | null; city: string | null }>,
   bodyParamsTemplate: string[],
 ): Promise<void> {
-  const pending = await listCampaignTargets(campaignId);
   const byWaId = new Map(targets.map((t) => [t.waId, t]));
 
   const campaigns = await listCampaigns(100);
   const campaign = campaigns.find((c) => c.id === campaignId);
   if (!campaign) throw new Error(`Campaign ${campaignId} not found`);
 
-  for (const target of pending) {
-    const info = byWaId.get(target.wa_id);
-    if (!info) continue;
+  let processed = 0;
 
-    try {
-      const params = fillParams(bodyParamsTemplate, info);
-      const result = await sendTemplateMessage(
-        target.wa_id,
-        campaign.template_name,
-        campaign.template_language,
-        params,
-      );
+  // Paginar pendientes hasta vaciar la cola (MatuDB limita filas por query).
+  for (;;) {
+    const pending = await listCampaignTargets(campaignId, 200);
+    if (pending.length === 0) break;
 
-      const conversation = await getOrCreateConversation({
+    for (const target of pending) {
+      const info = byWaId.get(target.wa_id) ?? {
+        leadId: target.lead_id ?? '',
         waId: target.wa_id,
-        profileName: info.name,
-      });
+        name: target.wa_id,
+        sector: null,
+        city: null,
+      };
 
-      await saveMessage({
-        conversationId: conversation.id,
-        waMessageId: result.waMessageId,
-        direction: 'outbound',
-        senderType: 'bot',
-        content: `[Plantilla enviada: ${params.join(' · ')}]`,
-        messageType: 'template',
-      });
+      try {
+        const params = fillParams(bodyParamsTemplate, info);
+        const result = await sendTemplateMessage(
+          target.wa_id,
+          campaign.template_name,
+          campaign.template_language,
+          params,
+        );
 
-      await markCampaignTargetResult(target.id, campaignId, true);
-    } catch (err) {
-      await markCampaignTargetResult(
-        target.id,
-        campaignId,
-        false,
-        err instanceof Error ? err.message : String(err),
-      );
+        const conversation = await getOrCreateConversation({
+          waId: target.wa_id,
+          profileName: info.name,
+        });
+
+        await saveMessage({
+          conversationId: conversation.id,
+          waMessageId: result.waMessageId,
+          direction: 'outbound',
+          senderType: 'bot',
+          content: `[Plantilla enviada: ${params.join(' · ')}]`,
+          messageType: 'template',
+        });
+
+        await markCampaignTargetResult(target.id, campaignId, true);
+      } catch (err) {
+        await markCampaignTargetResult(
+          target.id,
+          campaignId,
+          false,
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+
+      processed += 1;
+      await new Promise((resolve) => setTimeout(resolve, 1200));
     }
-
-    // Respect WhatsApp rate limits — small delay between sends.
-    await new Promise((resolve) => setTimeout(resolve, 1200));
   }
 
   await completeCampaign(campaignId);
@@ -156,7 +216,7 @@ async function runCampaignLoop(
     from: 'whatsapp-campaign',
     to: 'broadcast',
     topic: 'whatsapp.campaign_completed',
-    body: `Campaña completada: ${pending.length} envíos procesados`,
+    body: `Campaña completada: ${processed} envíos procesados en este ciclo`,
     payload: { campaignId },
   });
 }

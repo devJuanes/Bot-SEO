@@ -2,7 +2,6 @@ import type { FastifyBaseLogger } from 'fastify';
 import { env } from '../config/env.js';
 import { listAgents, runAgent } from '../agents/registry.js';
 import type { AgentId } from '../agents/types.js';
-import { nextHuntTarget } from './hunt-rotation.js';
 import { insertContentBrief } from '../db/growth.js';
 import {
   getAgentState,
@@ -12,8 +11,23 @@ import {
   registerRuntimeAgent,
   sendAgentMessage,
 } from './state.js';
+import {
+  runWithTenantAsync,
+  type TenantContext,
+  getTenant,
+} from '../tenancy/context.js';
+import {
+  listActiveAutopilotProjects,
+  type ProjectRow,
+} from '../tenancy/store.js';
+import {
+  isAgentEnabledForProject,
+  listAutopilotAgentIdsForProject,
+  getProjectAgent,
+} from '../db/project-agents.js';
+import { resolveLeadHunterRunParams } from '../agents/config-defaults.js';
 
-const running = new Set<AgentId>();
+const running = new Set<string>();
 
 const AGENT_TIMEOUT_MS: Record<AgentId, number> = {
   'lead-hunter': 12 * 60_000,
@@ -27,6 +41,10 @@ const AGENT_TIMEOUT_MS: Record<AgentId, number> = {
   'community-agent': 3 * 60_000,
   'facebook-publisher': 4 * 60_000,
 };
+
+function runKey(agentId: AgentId, projectId?: string): string {
+  return `${projectId ?? 'global'}:${agentId}`;
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -52,41 +70,42 @@ export function bootstrapRuntime(): void {
   }
   pushLog({
     level: 'info',
-    message: 'Runtime online · MatuByte Growth Factory cockpit',
+    message: 'Runtime online · Growth Factory SaaS cockpit',
   });
 }
 
-export async function executeAgent(
+async function executeAgentInner(
   id: AgentId,
   log: FastifyBaseLogger,
   triggeredBy: 'cron' | 'manual' | 'auto',
   params?: Record<string, unknown>,
 ): Promise<Awaited<ReturnType<typeof runAgent>>> {
-  if (running.has(id)) {
+  const projectId = getTenant()?.projectId;
+  const key = runKey(id, projectId);
+
+  if (running.has(key)) {
     pushLog({
       level: 'warn',
       agentId: id,
-      message: 'Skip · agent already running',
+      message: `Skip · agent already running (${projectId ?? 'no-project'})`,
     });
     throw new Error(`Agent ${id} is already running`);
   }
 
-  running.add(id);
+  running.add(key);
 
-  const huntParams =
-    id === 'lead-hunter' && (!params || Object.keys(params).length === 0)
-      ? (() => {
-          const target = nextHuntTarget();
-          return {
-            city: target.city,
-            sector: target.sector,
-            query: target.query,
-            country: target.country,
-            countryCode: target.countryCode,
-            maxResults: Math.min(env.LEAD_HUNTER_MAX_RESULTS, 8),
-          };
-        })()
-      : params;
+  const resolvedParams =
+    id === 'lead-hunter'
+      ? await resolveLeadHunterRunParams(projectId, params)
+      : params && Object.keys(params).length > 0
+        ? params
+        : projectId
+          ? ((await getProjectAgent(projectId, id))?.config as
+              | Record<string, unknown>
+              | undefined)
+          : params;
+
+  const huntParams = resolvedParams;
 
   const taskLabel =
     id === 'lead-hunter'
@@ -115,6 +134,23 @@ export async function executeAgent(
       ok ? undefined : outcome.result.reason,
     );
 
+    if (projectId) {
+      void import('../db/notifications.js')
+        .then(({ createNotification }) =>
+          createNotification({
+            projectId,
+            type: ok ? 'agent_run' : 'agent_error',
+            title: ok
+              ? `Agente ${id} completado`
+              : `Agente ${id} falló`,
+            body: String(outcome.result.reason ?? outcome.result.status).slice(0, 280),
+            link: id === 'facebook-publisher' ? '/facebook/queue' : '/agentes',
+            meta: { agentId: id, triggeredBy, status: outcome.result.status },
+          }),
+        )
+        .catch(() => undefined);
+    }
+
     if (id === 'lead-hunter' && ok) {
       const details = outcome.result.details ?? {};
       const sector = String(huntParams?.sector ?? 'negocios');
@@ -129,7 +165,7 @@ export async function executeAgent(
           problem: `Se detectaron ${needsWebsite || inserted} negocios de ${sector} sin sitio web en ${city}`,
           trend:
             'Negocios locales, emprendedores y equipos aún operan solo por WhatsApp/Maps sin web propia',
-          angle: `MatuByte puede ofrecer web, CMR, automatización o desarrollo a medida a ${sector} en ${city}`,
+          angle: `Oferta de web, CMR, automatización o desarrollo a medida a ${sector} en ${city}`,
           city,
           sector,
           country: String(huntParams?.countryCode ?? 'CO'),
@@ -216,11 +252,103 @@ export async function executeAgent(
     markAgentFinish(id, false, message, message);
     throw err;
   } finally {
-    running.delete(id);
+    running.delete(key);
   }
 }
 
-/** Autopilot cycles ALL agents so none stay forever idle in the cockpit. */
+export async function executeAgent(
+  id: AgentId,
+  log: FastifyBaseLogger,
+  triggeredBy: 'cron' | 'manual' | 'auto',
+  params?: Record<string, unknown>,
+  tenant?: TenantContext,
+): Promise<Awaited<ReturnType<typeof runAgent>>> {
+  if (tenant) {
+    return runWithTenantAsync(tenant, () =>
+      executeAgentInner(id, log, triggeredBy, params),
+    );
+  }
+  return executeAgentInner(id, log, triggeredBy, params);
+}
+
+export function projectTenant(project: ProjectRow): TenantContext {
+  return {
+    organizationId: project.organization_id,
+    projectId: project.id,
+  };
+}
+
+/** Run an agent once per autopilot-enabled project that has the agent enabled. */
+export async function executeAgentAcrossProjects(
+  id: AgentId,
+  log: FastifyBaseLogger,
+  triggeredBy: 'cron' | 'manual' | 'auto',
+  params?: Record<string, unknown>,
+): Promise<Array<{ projectId: string; ok: boolean; error?: string }>> {
+  const projects = await listActiveAutopilotProjects();
+  if (projects.length === 0) {
+    log.info({ agentId: id }, 'No autopilot projects — skip');
+    return [];
+  }
+
+  const results: Array<{ projectId: string; ok: boolean; error?: string }> = [];
+  for (const project of projects) {
+    const enabled = await isAgentEnabledForProject(project.id, id);
+    if (!enabled) {
+      log.info(
+        { agentId: id, projectId: project.id },
+        'Agent not enabled for project — skip',
+      );
+      continue;
+    }
+
+    if (triggeredBy === 'auto') {
+      const autopilotIds = await listAutopilotAgentIdsForProject(project.id);
+      if (!autopilotIds.includes(id)) {
+        continue;
+      }
+    }
+
+    try {
+      await executeAgent(id, log, triggeredBy, params, projectTenant(project));
+      results.push({ projectId: project.id, ok: true });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.error(
+        { err, agentId: id, projectId: project.id },
+        'Agent run failed for project',
+      );
+      results.push({ projectId: project.id, ok: false, error: message });
+    }
+  }
+  return results;
+}
+
+/** Dispara una ejecución en segundo plano al activar o reanudar un agente. */
+export function scheduleProjectAgentRun(
+  projectId: string,
+  agentId: string,
+  log: FastifyBaseLogger,
+): void {
+  void (async () => {
+    try {
+      const { getProject } = await import('../tenancy/store.js');
+      const project = await getProject(projectId);
+      if (!project) return;
+      await executeAgent(
+        agentId as AgentId,
+        log,
+        'auto',
+        undefined,
+        projectTenant(project),
+      );
+    } catch (err) {
+      log.warn({ err, projectId, agentId }, 'Background agent kick failed');
+    }
+  })();
+}
+
+/** Autopilot cycles ALL agents across autopilot projects. */
 export function startAutopilot(log: FastifyBaseLogger): void {
   if (!env.AUTO_START_AGENTS) {
     pushLog({
@@ -265,11 +393,11 @@ export function startAutopilot(log: FastifyBaseLogger): void {
 
     pushLog({
       level: 'info',
-      message: `Autopilot queue → ${id}`,
+      message: `Autopilot queue → ${id} (multi-project)`,
     });
 
     try {
-      await executeAgent(id, log, 'auto');
+      await executeAgentAcrossProjects(id, log, 'auto');
     } catch (err) {
       log.error({ err, agentId: id }, 'Autopilot queue agent failed');
     } finally {
@@ -277,8 +405,6 @@ export function startAutopilot(log: FastifyBaseLogger): void {
     }
   };
 
-  // First tick after delay, then every AUTO_HUNT_INTERVAL_MS / queue length
-  // so each agent runs roughly once per AUTO_HUNT_INTERVAL_MS window.
   const gap = Math.max(
     60_000,
     Math.floor(env.AUTO_HUNT_INTERVAL_MS / queue.length),

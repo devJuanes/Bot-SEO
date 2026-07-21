@@ -37,10 +37,10 @@ export const contentRadarAgent: Agent = {
     const startedAt = new Date().toISOString();
     const brand = getMatuByteSummary();
 
-    if (!isLlmConfigured() || /smoke|replace_me/i.test(ctx.env.LLM_API_KEY)) {
+    if (!(await isLlmConfigured())) {
       return {
         status: 'error',
-        reason: 'LLM_API_KEY no configurada para el Radar',
+        reason: 'LLM no configurado para este proyecto',
       };
     }
 

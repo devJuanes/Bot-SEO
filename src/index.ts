@@ -1,8 +1,5 @@
 import Fastify from 'fastify';
 import fastifyMultipart from '@fastify/multipart';
-import fastifyStatic from '@fastify/static';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 import { env } from './config/env.js';
 import { rootRoutes } from './routes/root.js';
 import { healthRoutes } from './routes/health.js';
@@ -13,15 +10,20 @@ import { whatsappWebhookRoutes } from './routes/whatsapp-webhook.js';
 import { whatsappApiRoutes } from './routes/whatsapp-api.js';
 import { facebookWebhookRoutes } from './routes/facebook-webhook.js';
 import { adminPushRoutes } from './routes/admin-push.js';
+import { authRoutes } from './routes/auth.js';
+import { tenancyRoutes } from './routes/tenancy.js';
+import { registerTenantGuard } from './tenancy/guard.js';
 import { startScheduler, stopScheduler } from './jobs/scheduler.js';
 import {
   bootstrapRuntime,
   startAutopilot,
 } from './runtime/orchestrator.js';
-import { seedAgentDefinitions, seedDefaultAppConnection } from './db/growth.js';
+import { seedAgentDefinitions } from './db/growth.js';
 import { attachAdminSocket } from './realtime/admin-socket.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { leadsApiRoutes } from './routes/leads-api.js';
+import { notificationsRoutes } from './routes/notifications-api.js';
+import { saasApiRoutes } from './routes/saas-api.js';
+import { registerSpaRoutes } from './routes/spa.js';
 
 async function main(): Promise<void> {
   const app = Fastify({
@@ -36,7 +38,6 @@ async function main(): Promise<void> {
     { parseAs: 'string' },
     (request, body, done) => {
       const raw = typeof body === 'string' ? body : body.toString('utf8');
-      // Kept raw for Meta's X-Hub-Signature-256 webhook verification.
       request.rawBody = raw;
       if (!raw || raw.length === 0) {
         done(null, {});
@@ -64,7 +65,13 @@ async function main(): Promise<void> {
     },
   });
 
+  await registerTenantGuard(app);
+  await app.register(authRoutes);
+  await app.register(tenancyRoutes);
   await app.register(dashboardRoutes);
+  await app.register(leadsApiRoutes);
+  await app.register(notificationsRoutes);
+  await app.register(saasApiRoutes);
   await app.register(growthApiRoutes);
   await app.register(whatsappWebhookRoutes);
   await app.register(whatsappApiRoutes);
@@ -74,7 +81,7 @@ async function main(): Promise<void> {
     await app.register(facebookWebhookRoutes);
     if (!env.META_APP_SECRET) {
       app.log.warn(
-        'FB_WEBHOOK_ENABLED=true pero META_APP_SECRET no está seteado — las firmas de Meta NO se verificarán (acepta cualquier request).',
+        'FB_WEBHOOK_ENABLED=true pero META_APP_SECRET no está seteado — las firmas de Meta NO se verificarán.',
       );
     } else {
       app.log.info(
@@ -86,17 +93,13 @@ async function main(): Promise<void> {
   await app.register(healthRoutes);
   await app.register(agentRoutes);
 
-  await app.register(fastifyStatic, {
-    root: join(__dirname, '..', 'public'),
-    prefix: '/',
-  });
+  await registerSpaRoutes(app);
 
   bootstrapRuntime();
 
   try {
     await seedAgentDefinitions();
-    await seedDefaultAppConnection();
-    app.log.info('Agent definitions + default app seeded in MatuDB');
+    app.log.info('Agent definitions seeded in MatuDB');
   } catch (err) {
     app.log.warn({ err }, 'Could not seed MatuDB catalog (run npm run migrate)');
   }
@@ -133,9 +136,10 @@ async function main(): Promise<void> {
         headlessMode: env.HEADLESS_MODE,
         autopilot: env.AUTO_START_AGENTS,
         cockpit: `http://127.0.0.1:${env.PORT}/`,
+        login: `http://127.0.0.1:${env.PORT}/acceso/iniciar-sesion`,
         adminPush: `ws://127.0.0.1:${env.PORT}/socket.io · admin:notify`,
       },
-      'Growth Factory Phase 4 ready',
+      'Growth Factory SaaS ready',
     );
   } catch (err) {
     app.log.error({ err }, 'Failed to start server');

@@ -58,10 +58,16 @@
           <input id="chatInput" type="text" placeholder="Pregúntale qué está haciendo, nichos, errores…" autocomplete="off" />
           <button class="btn" type="submit">SEND</button>
         </form>
-        <p class="hint">Requiere LLM_API_KEY real en .env · ver docs/CONFIGURACION.md</p>
+        <p class="hint">Requiere LLM configurado en Ajustes del proyecto.</p>
       </section>
     </main>
 
+    <script src="/saas-auth.js"></script>
+    <script>
+      if (GrowthAuth.requireAuthOrRedirect()) {
+        GrowthAuth.loadMe().catch(() => {});
+      }
+    </script>
     <script src="/agent.js" type="module"></script>
   </body>
 </html>

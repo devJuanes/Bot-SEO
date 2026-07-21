@@ -39,6 +39,12 @@
       </section>
     </main>
 
+    <script src="/saas-auth.js"></script>
+    <script>
+      if (GrowthAuth.requireAuthOrRedirect()) {
+        GrowthAuth.loadMe().catch(() => {});
+      }
+    </script>
     <script src="/whatsapp-thread.js" type="module"></script>
   </body>
 </html>
