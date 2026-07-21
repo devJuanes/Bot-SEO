@@ -42,8 +42,8 @@ log "=== Deploy iniciado en ${APP_DIR} ==="
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 log "Rama actual: ${CURRENT_BRANCH}"
 
-if [ -n "$(git status --porcelain)" ]; then
-  fail "Hay cambios sin commitear. Haz commit o stash antes de deployar."
+if [ -n "$(git status --porcelain)" ] && [ "${ALLOW_DIRTY:-}" != "1" ]; then
+  fail "Hay cambios sin commitear. Haz commit o stash antes de deployar (o ALLOW_DIRTY=1)."
 fi
 
 log "git pull origin ${CURRENT_BRANCH}"
@@ -72,7 +72,11 @@ log "npm run build (tsc)"
 npm run build >> "${DEPLOY_LOG}" 2>&1 \
   || fail "tsc falló. Revisa ${DEPLOY_LOG}."
 
-# Ahora sí podemos podar dev deps (ya tenemos dist/)
+log "npm run build:ui (vite)"
+npm run build:ui >> "${DEPLOY_LOG}" 2>&1 \
+  || fail "build:ui falló. Revisa ${DEPLOY_LOG}."
+
+# Ahora sí podemos podar dev deps (ya tenemos dist/ y frontend/dist/)
 log "npm prune --omit=dev"
 npm prune --omit=dev >> "${DEPLOY_LOG}" 2>&1 || true
 
