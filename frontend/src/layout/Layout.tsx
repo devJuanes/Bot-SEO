@@ -5,16 +5,21 @@ import { cn } from '../lib/cn';
 import { AppHeader } from './AppHeader';
 import { isNavGroup, NAV_TREE, RAIL_ITEMS } from './nav-config';
 import { useSetup } from '../hooks/useSetup';
+import { useWhatsAppUnread } from '../hooks/useWhatsAppUnread';
+import { ManageProjectsModal } from '../components/projects/ManageProjectsModal';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const { status } = useSetup();
+  const { unread: waUnread } = useWhatsAppUnread(true);
   const contentEnabled = Boolean(status?.contentEnabled);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     whatsapp: true,
     facebook: true,
     settings: false,
+    help: false,
   });
+  const [projectsOpen, setProjectsOpen] = useState(false);
 
   useEffect(() => {
     for (const item of NAV_TREE) {
@@ -45,19 +50,25 @@ export function Layout({ children }: { children: React.ReactNode }) {
           {rail.map((item) => {
             const Icon = item.icon;
             const active = location.pathname.startsWith(item.match);
+            const showWaBadge = item.match === '/whatsapp' && waUnread > 0;
             return (
               <NavLink
                 key={item.to}
                 to={item.to}
                 title={item.label}
                 className={cn(
-                  'flex h-10 w-10 items-center justify-center rounded-2xl transition',
+                  'relative flex h-10 w-10 items-center justify-center rounded-2xl transition',
                   active
                     ? 'bg-brand-50 text-brand-600'
                     : 'text-ink-muted hover:bg-surface hover:text-ink',
                 )}
               >
                 <Icon className="h-[18px] w-[18px] stroke-[1.75]" />
+                {showWaBadge ? (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand-600 px-0.5 text-[9px] font-bold text-white">
+                    {waUnread > 9 ? '9+' : waUnread}
+                  </span>
+                ) : null}
               </NavLink>
             );
           })}
@@ -113,6 +124,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
                     >
                       <item.icon className="h-4 w-4 shrink-0 stroke-[1.75]" />
                       <span className="flex-1">{item.label}</span>
+                      {item.id === 'whatsapp' && waUnread > 0 ? (
+                        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-bold text-white">
+                          {waUnread > 99 ? '99+' : waUnread}
+                        </span>
+                      ) : null}
                       {open ? (
                         <ChevronDown className="h-3.5 w-3.5" />
                       ) : (
@@ -146,6 +162,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <div className="border-t border-border-soft px-4 py-3">
               <button
                 type="button"
+                onClick={() => setProjectsOpen(true)}
                 className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-sm text-ink-muted transition hover:bg-white/60 hover:text-ink"
               >
                 <FolderOpen className="h-4 w-4" />
@@ -157,6 +174,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
           <main className="min-w-0 flex-1 overflow-y-auto bg-surface">{children}</main>
         </div>
       </div>
+
+      <ManageProjectsModal open={projectsOpen} onClose={() => setProjectsOpen(false)} />
     </div>
   );
 }

@@ -9,6 +9,8 @@ module.exports = {
       exec_mode: 'fork',
       env: {
         NODE_ENV: 'production',
+        // VPS compartido: MatuCash usa 4100; nginx growth.matubyte.com → 4101
+        PORT: '4101',
       },
       max_memory_restart: '800M',
       error_file: 'logs/pm2-error.log',

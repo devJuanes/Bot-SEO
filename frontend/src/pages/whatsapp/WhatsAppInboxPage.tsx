@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { MessageCircle, Send } from 'lucide-react';
 import { api, apiJson } from '../../api/client';
@@ -9,6 +9,7 @@ import { Textarea } from '../../components/ui/Input';
 import { EmptyState, LoadingState } from '../../components/ui/DataTable';
 import { SectionLayout } from '../../layout/SectionLayout';
 import { usePolling } from '../../hooks/usePolling';
+import { useWhatsAppUnread } from '../../hooks/useWhatsAppUnread';
 import { cn } from '../../lib/cn';
 
 interface Conversation {
@@ -24,6 +25,7 @@ interface Message {
   id: string;
   direction: string;
   body: string;
+  message_type?: string;
   created_at: string;
 }
 
@@ -45,9 +47,19 @@ function timeAgo(iso?: string): string {
   return `hace ${Math.floor(hours / 24)}d`;
 }
 
+function UnreadBadge({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-brand-600 px-1.5 text-[10px] font-bold text-white">
+      {count > 99 ? '99+' : count}
+    </span>
+  );
+}
+
 export function WhatsAppInboxPage() {
   const navigate = useNavigate();
   const { conversationId } = useParams();
+  const { refresh: refreshUnreadBadge } = useWhatsAppUnread(true);
   const [configured, setConfigured] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -55,6 +67,8 @@ export function WhatsAppInboxPage() {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevMessageCountRef = useRef(0);
 
   const refresh = useCallback(async (silent = false) => {
     try {
@@ -69,6 +83,7 @@ export function WhatsAppInboxPage() {
         '/api/whatsapp/conversations',
       );
       setConversations(conv.conversations || []);
+      void refreshUnreadBadge();
     } catch (e) {
       if (!silent) {
         setError(e instanceof Error ? e.message : 'No se pudieron cargar las conversaciones');
@@ -77,29 +92,59 @@ export function WhatsAppInboxPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, []);
+  }, [refreshUnreadBadge]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  usePolling(() => void refresh(true), 20_000, true, false);
+  usePolling(() => void refresh(true), 3_000, configured, false);
 
-  const loadMessages = useCallback(async (id: string) => {
-    try {
-      const data = await apiJson<{ messages: Message[] }>(
-        `/api/whatsapp/conversations/${encodeURIComponent(id)}/messages`,
-      );
-      setMessages(data.messages || []);
-    } catch {
-      setMessages([]);
-    }
-  }, []);
+  const loadMessages = useCallback(
+    async (id: string, options?: { markRead?: boolean; silent?: boolean }) => {
+      const markRead = options?.markRead ?? false;
+      const qs = markRead ? '' : '?markRead=0';
+      try {
+        const data = await apiJson<{ messages: Message[] }>(
+          `/api/whatsapp/conversations/${encodeURIComponent(id)}/messages${qs}`,
+        );
+        const next = data.messages || [];
+        setMessages(next);
+        if (markRead) {
+          setConversations((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, unread_count: 0 } : c)),
+          );
+          void refreshUnreadBadge();
+        }
+        if (next.length > prevMessageCountRef.current) {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+        prevMessageCountRef.current = next.length;
+      } catch {
+        if (!options?.silent) setMessages([]);
+      }
+    },
+    [refreshUnreadBadge],
+  );
 
   useEffect(() => {
-    if (conversationId) void loadMessages(conversationId);
-    else setMessages([]);
+    if (conversationId) {
+      prevMessageCountRef.current = 0;
+      void loadMessages(conversationId, { markRead: true });
+    } else {
+      setMessages([]);
+      prevMessageCountRef.current = 0;
+    }
   }, [conversationId, loadMessages]);
+
+  usePolling(
+    () => {
+      if (conversationId) void loadMessages(conversationId, { markRead: false, silent: true });
+    },
+    3_000,
+    Boolean(conversationId && configured),
+    false,
+  );
 
   async function sendReply() {
     if (!conversationId || !reply.trim()) return;
@@ -110,7 +155,8 @@ export function WhatsAppInboxPage() {
         body: JSON.stringify({ text: reply.trim() }),
       });
       setReply('');
-      await loadMessages(conversationId);
+      await loadMessages(conversationId, { markRead: true });
+      await refresh(true);
     } finally {
       setSending(false);
     }
@@ -126,6 +172,7 @@ export function WhatsAppInboxPage() {
   }
 
   const active = conversations.find((c) => c.id === conversationId);
+  const totalUnread = conversations.reduce((sum, c) => sum + (c.unread_count || 0), 0);
 
   return (
     <SectionLayout
@@ -133,10 +180,14 @@ export function WhatsAppInboxPage() {
       description="Mensajes en tiempo real, conversaciones y modo humano/bot."
       icon={MessageCircle}
       tabs={WA_TABS}
+      showFilter={false}
       actions={
-        <Badge tone={configured ? 'success' : 'danger'}>
-          {configured ? 'Meta conectado' : 'Sin configurar'}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {totalUnread > 0 ? <UnreadBadge count={totalUnread} /> : null}
+          <Badge tone={configured ? 'success' : 'danger'}>
+            {configured ? 'Meta conectado' : 'Sin configurar'}
+          </Badge>
+        </div>
       }
     >
       {loading ? (
@@ -164,8 +215,9 @@ export function WhatsAppInboxPage() {
       ) : (
         <div className="grid h-[calc(100vh-220px)] min-h-[520px] gap-4 lg:grid-cols-[320px_1fr]">
           <Card className="flex flex-col overflow-hidden">
-            <div className="border-b border-slate-100 px-4 py-3 text-sm font-semibold text-slate-900">
-              Conversaciones
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <span className="text-sm font-semibold text-slate-900">Conversaciones</span>
+              {totalUnread > 0 ? <UnreadBadge count={totalUnread} /> : null}
             </div>
             <div className="flex-1 overflow-y-auto">
               {conversations.length === 0 ? (
@@ -173,34 +225,35 @@ export function WhatsAppInboxPage() {
                   No hay conversaciones. Escribe al número de WhatsApp Business para probar.
                 </div>
               ) : (
-                conversations.map((c) => (
-                  <Link
-                    key={c.id}
-                    to={`/whatsapp/mensajes/${c.id}`}
-                    className={cn(
-                      'block border-b border-slate-50 px-4 py-3 transition hover:bg-brand-50/50',
-                      conversationId === c.id && 'bg-brand-50',
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="truncate font-medium text-slate-900">
-                        {c.profile_name || c.wa_id}
-                      </span>
-                      {c.unread_count > 0 && (
-                        <Badge tone="success">{c.unread_count}</Badge>
+                conversations.map((c) => {
+                  const unread = conversationId === c.id ? 0 : c.unread_count || 0;
+                  return (
+                    <Link
+                      key={c.id}
+                      to={`/whatsapp/mensajes/${c.id}`}
+                      className={cn(
+                        'block cursor-pointer border-b border-slate-50 px-4 py-3 transition hover:bg-brand-50/50',
+                        conversationId === c.id && 'bg-brand-50',
                       )}
-                    </div>
-                    <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
-                      <span className="truncate">{c.wa_id}</span>
-                      <span className="shrink-0">{timeAgo(c.last_message_at)}</span>
-                    </div>
-                    <div className="mt-1">
-                      <Badge tone={c.mode === 'human' ? 'warning' : 'brand'}>
-                        {c.mode === 'human' ? 'HUMANO' : 'BOT'}
-                      </Badge>
-                    </div>
-                  </Link>
-                ))
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate font-medium text-slate-900">
+                          {c.profile_name || c.wa_id}
+                        </span>
+                        <UnreadBadge count={unread} />
+                      </div>
+                      <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+                        <span className="truncate">{c.wa_id}</span>
+                        <span className="shrink-0">{timeAgo(c.last_message_at)}</span>
+                      </div>
+                      <div className="mt-1">
+                        <Badge tone={c.mode === 'human' ? 'warning' : 'brand'}>
+                          {c.mode === 'human' ? 'HUMANO' : 'BOT'}
+                        </Badge>
+                      </div>
+                    </Link>
+                  );
+                })
               )}
             </div>
           </Card>
@@ -246,13 +299,15 @@ export function WhatsAppInboxPage() {
                             : 'bg-white text-slate-800 ring-1 ring-slate-200',
                         )}
                       >
-                        {m.body}
+                        {m.body || `[${m.message_type || 'mensaje'}]`}
                         <div className="mt-1 text-[10px] opacity-70">
                           {new Date(m.created_at).toLocaleTimeString()}
+                          {m.direction === 'inbound' ? ' · recibido' : ' · enviado'}
                         </div>
                       </div>
                     ))
                   )}
+                  <div ref={messagesEndRef} />
                 </div>
                 <div className="border-t border-slate-100 p-4">
                   <div className="flex gap-2">
@@ -262,8 +317,18 @@ export function WhatsAppInboxPage() {
                       placeholder="Escribe una respuesta…"
                       value={reply}
                       onChange={(e) => setReply(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          void sendReply();
+                        }
+                      }}
                     />
-                    <Button onClick={() => void sendReply()} disabled={sending || !reply.trim()} loading={sending}>
+                    <Button
+                      onClick={() => void sendReply()}
+                      disabled={sending || !reply.trim()}
+                      loading={sending}
+                    >
                       <Send className="h-4 w-4" />
                     </Button>
                   </div>

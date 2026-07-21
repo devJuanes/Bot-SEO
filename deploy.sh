@@ -109,8 +109,10 @@ npm prune --omit=dev >> "${DEPLOY_LOG}" 2>&1 || true
 # ---------- Restart ----------
 restart_with_pm2() {
   if [ -f ecosystem.config.cjs ] || [ -f ecosystem.config.js ]; then
-    log "pm2 reload ecosystem"
-    pm2 reload ecosystem  >> "${DEPLOY_LOG}" 2>&1
+    local eco="ecosystem.config.cjs"
+    [ -f ecosystem.config.cjs ] || eco="ecosystem.config.js"
+    log "pm2 reload ${eco} --update-env"
+    pm2 reload "${eco}" --update-env >> "${DEPLOY_LOG}" 2>&1
   elif pm2 list | grep -q "${APP_NAME}"; then
     log "pm2 reload ${APP_NAME}"
     pm2 reload "${APP_NAME}" >> "${DEPLOY_LOG}" 2>&1

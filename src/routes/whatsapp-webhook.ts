@@ -5,7 +5,7 @@ import { handleIncomingWhatsAppMessage } from '../whatsapp/bot.js';
 import { downloadWhatsAppMedia, mediaPlaceholderLabel } from '../whatsapp/media.js';
 import { pushLog } from '../runtime/state.js';
 import {
-  findProjectBySecretValue,
+  resolveWhatsAppWebhookProject,
   type ProjectRow,
 } from '../tenancy/store.js';
 import { runWithTenantAsync } from '../tenancy/context.js';
@@ -116,38 +116,8 @@ export async function whatsappWebhookRoutes(app: FastifyInstance): Promise<void>
         if (!value?.messages) continue;
 
         const phoneNumberId = value.metadata?.phone_number_id;
-        let tenantCtx: ReturnType<typeof projectTenant> | null = null;
-
-        if (phoneNumberId) {
-          const p = await findProjectBySecretValue(
-            'whatsapp_phone_number_id',
-            phoneNumberId,
-          );
-          if (p) tenantCtx = projectTenant(p);
-        }
-
-        if (!tenantCtx && env.WHATSAPP_PHONE_NUMBER_ID) {
-          const p = await findProjectBySecretValue(
-            'whatsapp_phone_number_id',
-            env.WHATSAPP_PHONE_NUMBER_ID,
-          );
-          if (p) tenantCtx = projectTenant(p);
-        }
-
-        // Credenciales solo en .env: vincular al proyecto que tenga el mismo access token guardado.
-        if (
-          !tenantCtx &&
-          phoneNumberId &&
-          env.WHATSAPP_PHONE_NUMBER_ID &&
-          phoneNumberId === env.WHATSAPP_PHONE_NUMBER_ID &&
-          env.WHATSAPP_ACCESS_TOKEN
-        ) {
-          const p = await findProjectBySecretValue(
-            'whatsapp_access_token',
-            env.WHATSAPP_ACCESS_TOKEN,
-          );
-          if (p) tenantCtx = projectTenant(p);
-        }
+        const resolved = await resolveWhatsAppWebhookProject(phoneNumberId);
+        const tenantCtx = resolved ? projectTenant(resolved) : null;
 
         const processMessages = async () => {
           const contact = value.contacts?.[0];
@@ -208,14 +178,22 @@ export async function whatsappWebhookRoutes(app: FastifyInstance): Promise<void>
               }
             }
 
-            await handleIncomingWhatsAppMessage({
-              waId: message.from,
-              profileName: contact?.profile?.name ?? null,
-              text: content,
-              waMessageId: message.id ?? null,
-              messageType,
-              metadata,
-            });
+            try {
+              await handleIncomingWhatsAppMessage({
+                waId: message.from,
+                profileName: contact?.profile?.name ?? null,
+                text: content,
+                waMessageId: message.id ?? null,
+                messageType,
+                metadata,
+              });
+            } catch (err) {
+              pushLog({
+                level: 'error',
+                agentId: 'whatsapp-bot',
+                message: `Error guardando mensaje WA: ${err instanceof Error ? err.message : String(err)}`,
+              });
+            }
           }
         };
 

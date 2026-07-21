@@ -5,6 +5,43 @@ import { db } from './matu.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const RPC_RETRIES = 3;
+const RPC_RETRY_MS = 2000;
+
+function isTransientRpcError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes('fetch failed') ||
+    lower.includes('network') ||
+    lower.includes('econnreset') ||
+    lower.includes('etimedout') ||
+    lower.includes('socket hang up')
+  );
+}
+
+async function rpcWithRetry(sql: string): Promise<void> {
+  let lastError = 'unknown error';
+  for (let attempt = 1; attempt <= RPC_RETRIES; attempt++) {
+    try {
+      const { error } = await db.rpc(sql);
+      if (!error) return;
+      lastError =
+        typeof error === 'string'
+          ? error
+          : (error as { message?: string }).message ?? JSON.stringify(error);
+      if (!isTransientRpcError(lastError) || attempt === RPC_RETRIES) {
+        throw new Error(lastError);
+      }
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      if (!isTransientRpcError(lastError) || attempt === RPC_RETRIES) {
+        throw err instanceof Error ? err : new Error(lastError);
+      }
+    }
+    await new Promise((r) => setTimeout(r, RPC_RETRY_MS * attempt));
+  }
+  throw new Error(lastError);
+}
 function splitSqlStatements(sql: string): string[] {
   const withoutComments = sql
     .split('\n')
@@ -57,12 +94,10 @@ async function applySqlFile(relativePath: string): Promise<void> {
   const statements = splitSqlStatements(sql);
 
   for (const statement of statements) {
-    const { error } = await db.rpc(`${statement};`);
-    if (error) {
-      const message =
-        typeof error === 'string'
-          ? error
-          : (error as { message?: string }).message ?? JSON.stringify(error);
+    try {
+      await rpcWithRetry(`${statement};`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       throw new Error(
         `Schema statement failed (${relativePath}): ${message}\nSQL: ${statement.slice(0, 120)}...`,
       );
@@ -73,4 +108,6 @@ async function applySqlFile(relativePath: string): Promise<void> {
 export async function ensureSchema(): Promise<void> {
   await applySqlFile('sql/schema.sql');
   await applySqlFile('sql/tenancy.sql');
+  await applySqlFile('sql/automation.sql');
+  await applySqlFile('sql/contact.sql');
 }

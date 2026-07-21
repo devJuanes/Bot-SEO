@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Users } from 'lucide-react';
+import { Kanban, LayoutList, Search, Users, Workflow } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Input';
+import { LeadsKanbanBoard } from '../components/leads/LeadsKanbanBoard';
 import {
   DataTable,
   EmptyState,
@@ -15,6 +17,7 @@ import {
 } from '../components/ui/DataTable';
 import { SectionLayout } from '../layout/SectionLayout';
 import { shortName, truncate } from '../lib/format';
+import { STATUS_LABELS, STATUS_TONES } from '../lib/leads-pipeline';
 
 interface Lead {
   id: string;
@@ -29,26 +32,9 @@ interface Lead {
   created_at: string;
 }
 
-const STATUS_TONES: Record<string, 'default' | 'success' | 'warning' | 'brand' | 'danger'> = {
-  new: 'brand',
-  contacted: 'warning',
-  qualified: 'success',
-  won: 'success',
-  lost: 'danger',
-  discarded: 'default',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  new: 'Nuevo',
-  contacted: 'Contactado',
-  qualified: 'Calificado',
-  won: 'Ganado',
-  lost: 'Perdido',
-  discarded: 'Descartado',
-};
-
 export function LeadsPage() {
   const navigate = useNavigate();
+  const [view, setView] = useState<'table' | 'kanban'>('kanban');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -87,9 +73,39 @@ export function LeadsPage() {
       description="Base de contactos y prospectos de tu proyecto."
       icon={Users}
       actions={
-        <Button size="sm" variant="secondary" onClick={() => void load()}>
-          Actualizar
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <div className="flex rounded-lg border border-border-soft bg-white p-0.5">
+            <button
+              type="button"
+              onClick={() => setView('kanban')}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium ${
+                view === 'kanban' ? 'bg-brand-50 text-brand-700' : 'text-ink-muted'
+              }`}
+            >
+              <Kanban className="h-3.5 w-3.5" />
+              Kanban
+            </button>
+            <button
+              type="button"
+              onClick={() => setView('table')}
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium ${
+                view === 'table' ? 'bg-brand-50 text-brand-700' : 'text-ink-muted'
+              }`}
+            >
+              <LayoutList className="h-3.5 w-3.5" />
+              Tabla
+            </button>
+          </div>
+          <Link to="/automations">
+            <Button size="sm" variant="secondary">
+              <Workflow className="mr-1.5 h-4 w-4" />
+              Automatizaciones
+            </Button>
+          </Link>
+          <Button size="sm" variant="secondary" onClick={() => void load()}>
+            Actualizar
+          </Button>
+        </div>
       }
     >
       <div className="mb-5 grid gap-3 md:grid-cols-[1fr_auto_auto]">
@@ -137,7 +153,9 @@ export function LeadsPage() {
         </div>
       </div>
 
-      {loading ? (
+      {view === 'kanban' ? (
+        <LeadsKanbanBoard onRefresh={() => void load()} />
+      ) : loading ? (
         <LoadingState />
       ) : leads.length === 0 ? (
         <EmptyState

@@ -1,5 +1,7 @@
 # Cómo configurar MatuByte para blogs y contenido
 
+> **Documentación completa:** [Índice](README.md) · [Guía de usuario](GUIA-USUARIO.md) · [Referencia API](API.md)
+
 ## 1. Knowledge base (obligatorio)
 Edita y mantén actualizado:
 
@@ -232,3 +234,26 @@ por lo que también funcionan desde el cockpit local. El botón **APROBAR +
 PUBLICAR** siempre vuelve a leer el draft guardado antes de enviarlo.
 
 Flujo manual: agente genera → `pending_review` → apruebas en el panel → publica.
+
+---
+
+## Producción (VPS `growth.matubyte.com`)
+
+| Entorno | Puerto app | URL |
+|---------|------------|-----|
+| Local dev | `4100` | `http://localhost:4100` |
+| VPS (nginx) | `4101` en `.env` | `https://growth.matubyte.com` |
+
+En el VPS compartido **MatuCash** ya usa el puerto **4100**. Growth Factory debe tener `PORT=4101` en `/root/apps/Bot-SEO/.env` (nginx hace proxy a `127.0.0.1:4101`).
+
+Deploy en el servidor:
+
+```bash
+cd /root/apps/Bot-SEO
+git fetch origin main && git reset --hard origin/main
+git clean -fd -e .env -e logs
+./deploy.sh
+# Si hay cambios locales sin commit: SYNC_FROM_ORIGIN=1 ./deploy.sh
+```
+
+Verificar: `curl -s http://127.0.0.1:4101/health` y `curl -s https://growth.matubyte.com/health`.

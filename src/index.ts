@@ -21,7 +21,10 @@ import {
 import { seedAgentDefinitions } from './db/growth.js';
 import { attachAdminSocket } from './realtime/admin-socket.js';
 import { leadsApiRoutes } from './routes/leads-api.js';
+import { automationApiRoutes } from './routes/automation-api.js';
 import { notificationsRoutes } from './routes/notifications-api.js';
+import { supportApiRoutes } from './routes/support-api.js';
+import { contactApiRoutes } from './routes/contact-api.js';
 import { saasApiRoutes } from './routes/saas-api.js';
 import { registerSpaRoutes } from './routes/spa.js';
 
@@ -70,7 +73,10 @@ async function main(): Promise<void> {
   await app.register(tenancyRoutes);
   await app.register(dashboardRoutes);
   await app.register(leadsApiRoutes);
+  await app.register(automationApiRoutes);
   await app.register(notificationsRoutes);
+  await app.register(supportApiRoutes);
+  await app.register(contactApiRoutes);
   await app.register(saasApiRoutes);
   await app.register(growthApiRoutes);
   await app.register(whatsappWebhookRoutes);

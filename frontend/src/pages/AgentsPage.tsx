@@ -50,7 +50,6 @@ export function AgentsPage() {
   const [agents, setAgents] = useState<ProjectAgent[]>([]);
   const [catalog, setCatalog] = useState<CatalogAgent[]>([]);
   const [custom, setCustom] = useState<CustomAgent[]>([]);
-  const [contentEnabled, setContentEnabled] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [configAgent, setConfigAgent] = useState<ProjectAgent | null>(null);
@@ -68,13 +67,11 @@ export function AgentsPage() {
         agents: ProjectAgent[];
         catalog: CatalogAgent[];
         customAgents: CustomAgent[];
-        contentEnabled: boolean;
         brandConfigured: boolean;
       };
       setAgents(data.agents || []);
       setCatalog(data.catalog || []);
       setCustom(data.customAgents || []);
-      setContentEnabled(Boolean(data.contentEnabled));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

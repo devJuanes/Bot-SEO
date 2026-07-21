@@ -1,7 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { projectApi } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 
 export interface SettingsForm {
+  project_name: string;
   autopilot_enabled: boolean;
   llm_provider: string;
   llm_model: string;
@@ -39,6 +41,7 @@ interface SettingsContextValue {
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 const defaultForm: SettingsForm = {
+  project_name: '',
   autopilot_enabled: false,
   llm_provider: 'minimax',
   llm_model: '',
@@ -55,6 +58,7 @@ const defaultForm: SettingsForm = {
 };
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
+  const { refreshMe } = useAuth();
   const [data, setData] = useState<SettingsData | null>(null);
   const [form, setForm] = useState<SettingsForm>(defaultForm);
   const [secrets, setSecrets] = useState<Record<string, string>>({});
@@ -68,6 +72,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     setData(json);
     const s = json.settings || {};
     setForm({
+      project_name: String(json.project?.name || ''),
       autopilot_enabled: Boolean(json.project?.autopilot_enabled),
       llm_provider: String(s.llm_provider || 'minimax'),
       llm_model: String(s.llm_model || ''),
@@ -120,8 +125,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       });
       await projectApi('', {
         method: 'PATCH',
-        body: JSON.stringify({ autopilot_enabled: form.autopilot_enabled }),
+        body: JSON.stringify({
+          name: form.project_name.trim(),
+          autopilot_enabled: form.autopilot_enabled,
+        }),
       });
+      await refreshMe();
       setToast('Configuración guardada');
       setTimeout(() => setToast(''), 3000);
       await reload();

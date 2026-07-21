@@ -329,6 +329,17 @@ export async function handleIncomingWhatsAppMessage(input: {
     metadata: input.metadata,
   });
 
+  void import('../services/automation-engine.js')
+    .then(({ dispatchAutomationTrigger }) =>
+      dispatchAutomationTrigger('whatsapp.message_received', {
+        waId: input.waId,
+        text: input.text,
+        messageType,
+        conversationId: conversation.id,
+      }),
+    )
+    .catch(() => undefined);
+
   pushLog({
     level: 'info',
     agentId: AGENT_LABEL,

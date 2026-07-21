@@ -509,6 +509,67 @@ export async function findProjectBySecretValue(
   return null;
 }
 
+/** Resuelve el proyecto para webhooks entrantes de WhatsApp (Meta no envía tenant). */
+export async function resolveWhatsAppWebhookProject(
+  phoneNumberId: string | undefined,
+): Promise<ProjectRow | null> {
+  if (phoneNumberId) {
+    const byPhone = await findProjectBySecretValue(
+      'whatsapp_phone_number_id',
+      phoneNumberId,
+    );
+    if (byPhone) return byPhone;
+  }
+
+  const { env } = await import('../config/env.js');
+  if (env.WHATSAPP_PHONE_NUMBER_ID) {
+    if (!phoneNumberId || phoneNumberId === env.WHATSAPP_PHONE_NUMBER_ID) {
+      const byEnvPhone = await findProjectBySecretValue(
+        'whatsapp_phone_number_id',
+        env.WHATSAPP_PHONE_NUMBER_ID,
+      );
+      if (byEnvPhone) return byEnvPhone;
+
+      if (env.WHATSAPP_ACCESS_TOKEN) {
+        const byToken = await findProjectBySecretValue(
+          'whatsapp_access_token',
+          env.WHATSAPP_ACCESS_TOKEN,
+        );
+        if (byToken) return byToken;
+      }
+
+      const { data } = await db
+        .from('project_secrets')
+        .select('project_id')
+        .eq('key', 'whatsapp_phone_number_id')
+        .limit(1);
+      const projectId = (data?.[0] as { project_id?: string } | undefined)?.project_id;
+      if (projectId) return getProject(projectId);
+
+      const { data: projects } = await db
+        .from('projects')
+        .select('*')
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (projects?.[0]) return projects[0] as ProjectRow;
+    }
+  }
+
+  if (phoneNumberId) {
+    const { data: projects } = await db
+      .from('project_secrets')
+      .select('project_id')
+      .eq('key', 'whatsapp_phone_number_id')
+      .limit(5);
+    for (const row of (projects ?? []) as Array<{ project_id: string }>) {
+      const p = await getProject(row.project_id);
+      if (p) return p;
+    }
+  }
+
+  return null;
+}
+
 export async function registerAndBootstrap(input: {
   email: string;
   password: string;

@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, LogOut, Search, Settings } from 'lucide-react';
+import { Bell, LogOut, Search, Settings } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useNotifications } from '../hooks/useNotifications';
 import { Button } from '../components/ui/Button';
+import { ProjectSwitcherDropdown } from '../components/projects/ProjectSwitcherDropdown';
 import { cn } from '../lib/cn';
 
 export function AppHeader() {
-  const { allProjects, projectId, setActiveProject, logout } = useAuth();
+  const { logout } = useAuth();
   const { items, unread, toast, dismissToast, markRead, markAllRead } = useNotifications();
-  const active = allProjects.find((x) => x.project.id === projectId);
   const [openBell, setOpenBell] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const bellRef = useRef<HTMLDivElement>(null);
@@ -30,18 +30,7 @@ export function AppHeader() {
 
   return (
     <header className="relative flex h-14 shrink-0 items-center gap-4 border-b border-border-soft bg-white px-5">
-      <button
-        type="button"
-        className="flex items-center gap-2 rounded-full py-1.5 pl-1 pr-3 text-sm font-semibold text-ink transition hover:bg-surface"
-      >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-600 text-xs font-bold text-white">
-          M
-        </span>
-        <span className="max-w-[140px] truncate">
-          {active ? active.project.name : 'MatuByte'}
-        </span>
-        <ChevronDown className="h-4 w-4 text-ink-muted" />
-      </button>
+      <ProjectSwitcherDropdown />
 
       <div className="mx-auto hidden w-full max-w-md md:block">
         <div className="relative">
@@ -55,23 +44,6 @@ export function AppHeader() {
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {allProjects.length > 1 && (
-          <select
-            className="hidden h-9 max-w-[160px] truncate rounded-full border border-border-soft bg-surface px-3 text-xs text-ink lg:block"
-            value={projectId ?? ''}
-            onChange={(e) => {
-              const found = allProjects.find((x) => x.project.id === e.target.value);
-              if (found) setActiveProject(found.project.id, found.org.id);
-            }}
-          >
-            {allProjects.map(({ org, project }) => (
-              <option key={project.id} value={project.id}>
-                {org.name} · {project.name}
-              </option>
-            ))}
-          </select>
-        )}
-
         <div className="relative" ref={bellRef}>
           <button
             type="button"

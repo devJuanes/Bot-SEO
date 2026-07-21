@@ -235,3 +235,23 @@ CREATE TABLE IF NOT EXISTS company_chat_messages (
 );
 
 CREATE INDEX IF NOT EXISTS idx_company_chat_session ON company_chat_messages(project_id, session_id, created_at);
+
+-- Support tickets (help center)
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  category VARCHAR(40) NOT NULL DEFAULT 'general',
+  subject VARCHAR(300) NOT NULL,
+  message TEXT NOT NULL,
+  status VARCHAR(30) NOT NULL DEFAULT 'open',
+  priority VARCHAR(20) NOT NULL DEFAULT 'normal',
+  admin_reply TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_tickets_project ON support_tickets(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_user ON support_tickets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON support_tickets(project_id, status);

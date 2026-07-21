@@ -114,6 +114,18 @@ async function executeAgentInner(
 
   markAgentStart(id, taskLabel);
 
+  if (projectId) {
+    void import('../services/automation-engine.js')
+      .then(({ dispatchAutomationTrigger }) =>
+        dispatchAutomationTrigger(
+          'agent.run.started',
+          { agentId: id, agentStatus: 'started' },
+          log,
+        ),
+      )
+      .catch(() => undefined);
+  }
+
   try {
     const outcome = await withTimeout(
       runAgent(id, {
@@ -135,6 +147,19 @@ async function executeAgentInner(
     );
 
     if (projectId) {
+      void import('../services/automation-engine.js')
+        .then(({ dispatchAutomationTrigger }) =>
+          dispatchAutomationTrigger(
+            'agent.run.completed',
+            {
+              agentId: id,
+              agentStatus: ok ? 'success' : 'error',
+            },
+            log,
+          ),
+        )
+        .catch(() => undefined);
+
       void import('../db/notifications.js')
         .then(({ createNotification }) =>
           createNotification({

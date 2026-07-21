@@ -9,7 +9,7 @@ import {
   MapPin,
   Phone,
   Search,
-  Sparkles,
+  TrendingUp,
   Star,
   Users,
 } from 'lucide-react';
@@ -21,6 +21,7 @@ import { LoadingState } from '../components/ui/DataTable';
 import { SectionLayout } from '../layout/SectionLayout';
 import { formatDateTime } from '../lib/format';
 import { cn } from '../lib/cn';
+import { LeadWhatsAppChat } from '../components/leads/LeadWhatsAppChat';
 
 interface Lead {
   id: string;
@@ -296,9 +297,19 @@ export function LeadDetailPage() {
       setLoading(true);
       try {
         const res = await api(`/api/leads/${encodeURIComponent(id)}`);
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'No encontrado');
-        setLead(data.lead);
+        const data = await res.text();
+        if (!res.ok) {
+          let msg = 'No encontrado';
+          try {
+            const parsed = JSON.parse(data) as { error?: string };
+            if (parsed.error) msg = parsed.error;
+          } catch {
+            /* ignore */
+          }
+          throw new Error(msg);
+        }
+        const json = JSON.parse(data) as { lead: Lead };
+        setLead(json.lead);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -496,7 +507,7 @@ export function LeadDetailPage() {
                             : entry.key === 'scraped_at'
                               ? Calendar
                               : entry.key === 'opportunity'
-                                ? Sparkles
+                                ? TrendingUp
                                 : Globe
                         }
                       />
@@ -508,6 +519,13 @@ export function LeadDetailPage() {
           </div>
         </div>
       )}
+
+      {lead && !loading && !error ? (
+        <LeadWhatsAppChat
+          lead={{ id: lead.id, name: lead.name, phone: lead.phone, status: lead.status }}
+          onStatusChange={(status) => setLead((prev) => (prev ? { ...prev, status } : prev))}
+        />
+      ) : null}
     </SectionLayout>
   );
 }

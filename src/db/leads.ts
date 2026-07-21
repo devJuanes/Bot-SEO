@@ -1,5 +1,6 @@
 import { db } from './matu.js';
-import type { AgentRunInsert, Lead, LeadInsert } from './types.js';
+import { countRows, fetchAllRows } from './paginate.js';
+import type { AgentRunInsert, Lead, LeadInsert, LeadStatus } from './types.js';
 import {
   requireProjectId,
   tenantInsertFields,
@@ -19,6 +20,21 @@ export function normalizePhone(phone: string | null | undefined): string | null 
   const digits = phone.replace(/\D/g, '');
   if (digits.length < 7) return null;
   return digits.slice(-10);
+}
+
+export const LEAD_PIPELINE: Array<{ key: LeadStatus; label: string }> = [
+  { key: 'new', label: 'Nuevo' },
+  { key: 'contacted', label: 'Contactado' },
+  { key: 'qualified', label: 'Calificado' },
+  { key: 'won', label: 'Ganado' },
+  { key: 'lost', label: 'Perdido' },
+  { key: 'discarded', label: 'Descartado' },
+];
+
+export const VALID_LEAD_STATUSES = new Set(LEAD_PIPELINE.map((s) => s.key));
+
+export function isValidLeadStatus(status: string): status is LeadStatus {
+  return VALID_LEAD_STATUSES.has(status as LeadStatus);
 }
 
 export function normalizeName(name: string): string {
@@ -106,6 +122,15 @@ export async function findDuplicateLead(input: {
   return null;
 }
 
+async function fireLeadCreatedAutomation(lead: Lead): Promise<void> {
+  try {
+    const { dispatchAutomationTrigger } = await import('../services/automation-engine.js');
+    await dispatchAutomationTrigger('lead.created', { leadId: lead.id, lead });
+  } catch {
+    /* ignore */
+  }
+}
+
 export async function upsertLead(lead: LeadInsert): Promise<{
   action: 'inserted' | 'updated' | 'skipped_duplicate';
   lead: Lead;
@@ -171,6 +196,8 @@ export async function upsertLead(lead: LeadInsert): Promise<{
   if (!inserted) {
     throw new Error('insert lead returned no row');
   }
+
+  void fireLeadCreatedAutomation(inserted);
 
   return { action: 'inserted', lead: inserted };
 }
@@ -245,9 +272,7 @@ export async function listRecentRuns(limit = 20): Promise<Record<string, unknown
 
 export async function countLeads(): Promise<number> {
   try {
-    const { data, error } = await scopedLeads().select('id').limit(5000);
-    if (error) return 0;
-    return Array.isArray(data) ? data.length : 0;
+    return await countRows(() => scopedLeads() as never);
   } catch {
     return 0;
   }
@@ -262,19 +287,16 @@ export async function listLeadsPaginated(input: {
 }): Promise<{ leads: Lead[]; total: number }> {
   const limit = Math.min(100, Math.max(1, input.limit ?? 25));
   const offset = Math.max(0, input.offset ?? 0);
-
-  const { data, error } = await scopedLeads()
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    throw new Error(`listLeadsPaginated failed: ${errorMessage(error)}`);
-  }
-
-  let rows = (data ?? []) as Lead[];
   const needle = input.search?.trim().toLowerCase();
+
   if (needle) {
-    rows = rows.filter(
+    const rows = await fetchAllRows<Lead>(() => scopedLeads() as never, '*', {
+      orderBy: 'created_at',
+    });
+    let filtered = rows;
+    if (input.status) filtered = filtered.filter((row) => row.status === input.status);
+    if (input.source) filtered = filtered.filter((row) => row.source === input.source);
+    filtered = filtered.filter(
       (row) =>
         row.name.toLowerCase().includes(needle) ||
         (row.phone?.includes(needle) ?? false) ||
@@ -282,17 +304,36 @@ export async function listLeadsPaginated(input: {
         (row.email?.toLowerCase().includes(needle) ?? false) ||
         (row.business_type?.toLowerCase().includes(needle) ?? false),
     );
+    filtered.sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+    return {
+      total: filtered.length,
+      leads: filtered.slice(offset, offset + limit),
+    };
   }
-  if (input.status) {
-    rows = rows.filter((row) => row.status === input.status);
-  }
-  if (input.source) {
-    rows = rows.filter((row) => row.source === input.source);
+
+  const buildFiltered = () => {
+    let q = scopedLeads() as ReturnType<typeof scopedLeads>;
+    if (input.status) q = q.eq('status', input.status) as typeof q;
+    if (input.source) q = q.eq('source', input.source) as typeof q;
+    return q;
+  };
+
+  const total = await countRows(() => buildFiltered() as never);
+
+  const { data, error } = await buildFiltered()
+    .select('*')
+    .order('created_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    throw new Error(`listLeadsPaginated failed: ${errorMessage(error)}`);
   }
 
   return {
-    total: rows.length,
-    leads: rows.slice(offset, offset + limit),
+    total,
+    leads: (data ?? []) as Lead[],
   };
 }
 
@@ -304,21 +345,110 @@ export async function getLeadById(id: string): Promise<Lead | null> {
   return ((data ?? [])[0] as Lead | undefined) ?? null;
 }
 
+export async function listLeadsKanban(limitPerColumn = 80): Promise<{
+  columns: Record<string, Lead[]>;
+  counts: Record<string, number>;
+}> {
+  const rows = await fetchAllRows<Lead>(() => scopedLeads() as never, '*', {
+    orderBy: 'updated_at',
+  });
+
+  rows.sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  );
+
+  const columns: Record<string, Lead[]> = {};
+  const counts: Record<string, number> = {};
+
+  for (const stage of LEAD_PIPELINE) {
+    columns[stage.key] = [];
+    counts[stage.key] = 0;
+  }
+
+  for (const lead of rows) {
+    const key = isValidLeadStatus(lead.status) ? lead.status : 'new';
+    counts[key] = (counts[key] ?? 0) + 1;
+    if ((columns[key]?.length ?? 0) < limitPerColumn) {
+      columns[key]!.push(lead);
+    }
+  }
+
+  return { columns, counts };
+}
+
+export async function updateLeadStatus(
+  id: string,
+  status: string,
+  options?: {
+    changedBy?: string;
+    reason?: string;
+    skipAutomation?: boolean;
+  },
+): Promise<Lead | null> {
+  if (!isValidLeadStatus(status)) {
+    throw new Error(`Estado inválido: ${status}`);
+  }
+
+  const existing = await getLeadById(id);
+  if (!existing) return null;
+
+  const fromStatus = existing.status;
+  if (fromStatus === status) return existing;
+
+  const { error } = await scopedLeads()
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', id);
+
+  if (error) {
+    throw new Error(`updateLeadStatus failed: ${errorMessage(error)}`);
+  }
+
+  try {
+    const { logLeadStatusEvent } = await import('./automation.js');
+    await logLeadStatusEvent({
+      leadId: id,
+      fromStatus,
+      toStatus: status,
+      changedBy: options?.changedBy ?? 'user',
+      reason: options?.reason,
+    });
+  } catch {
+    /* table may not exist yet */
+  }
+
+  const updated = await getLeadById(id);
+
+  if (!options?.skipAutomation && updated) {
+    try {
+      const { dispatchAutomationTrigger } = await import('../services/automation-engine.js');
+      await dispatchAutomationTrigger('lead.status_changed', {
+        leadId: id,
+        lead: updated,
+        fromStatus,
+        toStatus: status,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return updated;
+}
+
 export async function getLeadStats(): Promise<{
   total: number;
   byStatus: Record<string, number>;
   bySource: Record<string, number>;
   needsWebsite: number;
 }> {
-  const { data, error } = await scopedLeads().select('status, source, needs_website');
-  if (error) {
-    throw new Error(`getLeadStats failed: ${errorMessage(error)}`);
-  }
-  const rows = (data ?? []) as Array<{
+  const rows = await fetchAllRows<{
     status: string;
     source: string;
     needs_website: boolean;
-  }>;
+  }>(() => scopedLeads() as never, 'status, source, needs_website', {
+    orderBy: 'id',
+  });
+
   const byStatus: Record<string, number> = {};
   const bySource: Record<string, number> = {};
   let needsWebsite = 0;

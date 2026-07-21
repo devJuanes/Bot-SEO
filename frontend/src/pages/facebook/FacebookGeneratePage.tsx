@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Share2, Sparkles } from 'lucide-react';
+import { Share2 } from 'lucide-react';
 import { apiJson, projectApi } from '../../api/client';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
@@ -123,7 +123,6 @@ export function FacebookGeneratePage() {
         <Card>
           <CardBody className="space-y-4">
             <div className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-brand-600" />
               <h2 className="font-semibold text-slate-900">Generar post</h2>
             </div>
             <p className="text-sm text-slate-500">{hint}</p>

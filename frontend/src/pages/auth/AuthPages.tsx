@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
+import { parseJsonResponse } from '../../api/client';
 import { Button } from '../../components/ui/Button';
 import { PageLoader } from '../../components/ui/PageLoader';
 import { Field, Input } from '../../components/ui/Input';
@@ -87,16 +88,28 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
           };
 
     try {
-      const res = await fetch(
-        mode === 'login' ? '/api/auth/login' : '/api/auth/register',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(body),
-        },
-      );
-      const data = await res.json();
+      let res: Response;
+      try {
+        res = await fetch(
+          mode === 'login' ? '/api/auth/login' : '/api/auth/register',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(body),
+          },
+        );
+      } catch {
+        throw new Error('No se pudo conectar con el servidor. Ejecuta npm run dev.');
+      }
+      const data = await parseJsonResponse<{
+        error?: string;
+        token?: string;
+        project?: { id: string };
+        projects?: Array<{ id: string }>;
+        organization?: { id: string };
+        organizations?: Array<{ id: string }>;
+      }>(res);
       if (!res.ok) throw new Error(data.error || 'Error de autenticación');
       const projectId =
         data.project?.id ||

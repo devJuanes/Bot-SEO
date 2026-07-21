@@ -115,6 +115,10 @@ export async function loadProjectConfig(
     typeof settings.llm_base_url === 'string' ? settings.llm_base_url : '';
 
   const waConfigured = Boolean(waToken && waPhoneId);
+  const envWaConfigured = Boolean(
+    env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID,
+  );
+  const effectiveWaConfigured = waConfigured || envWaConfigured;
   const fbConfigured = Boolean(fbToken && fbPageId);
   const llmConfigured = Boolean(llmKey && llmModel && llmBaseUrl);
 
@@ -135,13 +139,16 @@ export async function loadProjectConfig(
       configured: llmConfigured,
     },
     whatsapp: {
-      enabled: typeof waEnabledSetting === 'boolean' ? waEnabledSetting : waConfigured,
-      configured: waConfigured,
-      accessToken: waToken ?? undefined,
-      phoneNumberId: waPhoneId ?? undefined,
-      businessAccountId: waBizId ?? undefined,
-      ownerPhone: waOwner ?? undefined,
-      verifyToken: waVerify ?? undefined,
+      enabled:
+        typeof waEnabledSetting === 'boolean'
+          ? waEnabledSetting
+          : effectiveWaConfigured,
+      configured: effectiveWaConfigured,
+      accessToken: waToken ?? env.WHATSAPP_ACCESS_TOKEN ?? undefined,
+      phoneNumberId: waPhoneId ?? env.WHATSAPP_PHONE_NUMBER_ID ?? undefined,
+      businessAccountId: waBizId ?? env.WHATSAPP_BUSINESS_ACCOUNT_ID ?? undefined,
+      ownerPhone: waOwner ?? env.WHATSAPP_OWNER_PHONE ?? undefined,
+      verifyToken: waVerify ?? env.WHATSAPP_VERIFY_TOKEN ?? undefined,
       handoffKeywords:
         typeof settings.whatsapp_handoff_keywords === 'string'
           ? settings.whatsapp_handoff_keywords

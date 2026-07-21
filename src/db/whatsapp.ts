@@ -1,4 +1,5 @@
 import { db } from './matu.js';
+import { countRows, fetchAllRows } from './paginate.js';
 import { normalizePhone } from './leads.js';
 import {
   getTenant,
@@ -174,6 +175,28 @@ async function claimConversationForTenant(
   return conv;
 }
 
+export async function linkConversationToLead(
+  conversationId: string,
+  leadId: string,
+): Promise<void> {
+  await db
+    .from('whatsapp_conversations')
+    .eq('id', conversationId)
+    .update({ lead_id: leadId, updated_at: new Date().toISOString() });
+}
+
+export async function findConversationByLeadId(
+  leadId: string,
+): Promise<WhatsAppConversation | null> {
+  const { data, error } = await scopedConv()
+    .select('*')
+    .eq('lead_id', leadId)
+    .limit(1);
+
+  if (error) throw new Error(`findConversationByLeadId: ${errMsg(error)}`);
+  return ((data ?? [])[0] as WhatsAppConversation | undefined) ?? null;
+}
+
 export async function saveMessage(input: {
   conversationId: string;
   waMessageId?: string | null;
@@ -185,6 +208,22 @@ export async function saveMessage(input: {
   status?: string;
   metadata?: Record<string, unknown> | null;
 }): Promise<void> {
+  if (input.waMessageId) {
+    const { data: existing } = await db
+      .from('whatsapp_messages')
+      .select('id')
+      .eq('wa_message_id', input.waMessageId)
+      .limit(1);
+    if (existing?.[0]) return;
+  }
+
+  const metadata =
+    input.metadata == null
+      ? '{}'
+      : typeof input.metadata === 'string'
+        ? input.metadata
+        : JSON.stringify(input.metadata);
+
   const { error } = await db.from('whatsapp_messages').insert({
     conversation_id: input.conversationId,
     wa_message_id: input.waMessageId ?? null,
@@ -194,7 +233,7 @@ export async function saveMessage(input: {
     message_type: input.messageType ?? 'text',
     template_name: input.templateName ?? null,
     status: input.status ?? 'sent',
-    metadata: input.metadata ?? {},
+    metadata,
     ...tenantInsertFields(),
   });
   if (error) throw new Error(`saveMessage: ${errMsg(error)}`);
@@ -248,35 +287,52 @@ export async function setConversationMode(
   if (error) throw new Error(`setConversationMode: ${errMsg(error)}`);
 }
 
-export async function listConversations(limit = 60): Promise<WhatsAppConversation[]> {
+export async function countConversations(): Promise<number> {
+  return countRows(() => scopedConv() as never);
+}
+
+export async function adoptOrphanConversations(): Promise<void> {
   const projectId = requireProjectId();
   const organizationId = requireOrganizationId();
-
-  // Conversaciones antiguas creadas sin project_id (webhook sin tenant) — las vinculamos al proyecto actual.
-  const { data: orphans } = await db
-    .from('whatsapp_conversations')
-    .select('id')
-    .is('project_id', null)
-    .limit(100);
-  if (orphans?.length) {
-    for (const row of orphans as Array<{ id: string }>) {
-      await db
-        .from('whatsapp_conversations')
-        .eq('id', row.id)
-        .update({ project_id: projectId, organization_id: organizationId })
-        .catch(() => undefined);
-    }
+  const orphans = await fetchAllRows<{ id: string }>(
+    () => db.from('whatsapp_conversations').is('project_id', null) as never,
+    'id',
+    { orderBy: 'updated_at', pageSize: 100 },
+  );
+  for (const row of orphans) {
+    await db
+      .from('whatsapp_conversations')
+      .eq('id', row.id)
+      .update({ project_id: projectId, organization_id: organizationId })
+      .catch(() => undefined);
   }
+}
 
-  const { data, error } = await scopedConv()
-    .select(
-      'id, wa_id, profile_name, lead_id, mode, assigned_to, status, last_message_at, last_customer_message_at, unread_count, created_at, updated_at',
-    )
-    .order('updated_at', { ascending: false })
-    .limit(Math.min(Math.max(limit, 1), 100));
-  if (error) throw new Error(`listConversations: ${errMsg(error)}`);
-  const rows = (data ?? []) as WhatsAppConversation[];
-  return enrichConversationsWithLead(rows);
+export async function getTotalUnreadCount(): Promise<number> {
+  await adoptOrphanConversations();
+  const rows = await fetchAllRows<{ unread_count?: number }>(
+    () => scopedConv() as never,
+    'unread_count',
+    { orderBy: 'updated_at', pageSize: 100 },
+  );
+  return rows.reduce((sum, row) => sum + (Number(row.unread_count) || 0), 0);
+}
+
+export async function listConversations(limit = 200): Promise<WhatsAppConversation[]> {
+  await adoptOrphanConversations();
+
+  const rows = await fetchAllRows<WhatsAppConversation>(
+    () => scopedConv() as never,
+    'id, wa_id, profile_name, lead_id, mode, assigned_to, status, last_message_at, last_customer_message_at, unread_count, created_at, updated_at',
+    { orderBy: 'updated_at', pageSize: 100 },
+  );
+
+  rows.sort(
+    (a, b) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  );
+
+  return enrichConversationsWithLead(rows.slice(0, Math.max(1, limit)));
 }
 
 async function enrichConversationsWithLead(
@@ -329,29 +385,48 @@ async function enrichConversationsWithLead(
 }
 
 export async function getConversationById(id: string): Promise<WhatsAppConversation | null> {
-  let q = db.from('whatsapp_conversations').select('*').eq('id', id);
-  const projectId = getTenant()?.projectId;
-  if (projectId) q = q.eq('project_id', projectId);
-  const { data, error } = await q.limit(1);
+  const { data, error } = await db.from('whatsapp_conversations').select('*').eq('id', id).limit(1);
   if (error) throw new Error(`getConversationById: ${errMsg(error)}`);
-  const row = ((data ?? [])[0] as WhatsAppConversation | undefined) ?? null;
+  let row = ((data ?? [])[0] as WhatsAppConversation | undefined) ?? null;
   if (!row) return null;
+
+  const projectId = getTenant()?.projectId;
+  if (projectId) {
+    if (!row.project_id) {
+      row = await claimConversationForTenant(row);
+    } else if (row.project_id !== projectId) {
+      return null;
+    }
+  }
+
   const [enriched] = await enrichConversationsWithLead([row]);
   return enriched;
 }
 
 export async function listMessages(
   conversationId: string,
-  limit = 100,
+  limit = 500,
 ): Promise<WhatsAppMessage[]> {
-  const { data, error } = await db
-    .from('whatsapp_messages')
-    .select('*')
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true })
-    .limit(limit);
-  if (error) throw new Error(`listMessages: ${errMsg(error)}`);
-  return (data ?? []) as WhatsAppMessage[];
+  const rows: WhatsAppMessage[] = [];
+  let from = 0;
+  const pageSize = 100;
+
+  while (from < 10_000) {
+    const { data, error } = await db
+      .from('whatsapp_messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(`listMessages: ${errMsg(error)}`);
+    const batch = (data ?? []) as WhatsAppMessage[];
+    rows.push(...batch);
+    if (batch.length < pageSize) break;
+    from += pageSize;
+  }
+
+  if (rows.length <= limit) return rows;
+  return rows.slice(-limit);
 }
 
 export interface WhatsAppCampaign {

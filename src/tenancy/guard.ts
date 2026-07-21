@@ -9,6 +9,7 @@ import { extractBearerToken, getProjectIdFromRequest } from '../tenancy/auth.js'
 
 const PUBLIC_PREFIXES = [
   '/api/auth',
+  '/api/public',
   '/webhooks',
   '/health',
   '/api/admin/push',

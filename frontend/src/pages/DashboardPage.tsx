@@ -26,6 +26,7 @@ import { Card, CardBody, CardHeader } from '../components/ui/Card';
 import { LoadingState } from '../components/ui/DataTable';
 import { StatCard } from '../components/ui/StatCard';
 import { usePolling } from '../hooks/usePolling';
+import { LEAD_PIPELINE } from '../lib/leads-pipeline';
 
 interface Agent {
   id: string;
@@ -87,16 +88,21 @@ export function DashboardPage() {
   const agents = data?.agents ?? [];
   const sourceChart = leadStats
     ? Object.entries(leadStats.bySource)
-        .slice(0, 5)
+        .sort((a, b) => b[1] - a[1])
         .map(([name, value]) => ({ name, value }))
     : [];
+  const pipelineRows = LEAD_PIPELINE.map((stage) => ({
+    key: stage.key,
+    label: stage.label,
+    count: leadStats?.byStatus[stage.key] ?? 0,
+  })).filter((row) => row.count > 0);
   const activityData = (data?.logs ?? []).slice(0, 14).map((log, i) => ({
     idx: i + 1,
     level: log.level === 'error' ? 3 : log.level === 'warn' ? 2 : 1,
   }));
 
   const totalLeads = leadStats?.total ?? stats.leadsApprox ?? 0;
-  const hasPipeline = Boolean(leadStats && Object.keys(leadStats.byStatus).length > 0);
+  const hasPipeline = pipelineRows.length > 0;
   const hasActivity = (data?.logs ?? []).length > 0;
 
   return (
@@ -150,7 +156,7 @@ export function DashboardPage() {
         <StatCard label="Oportunidades" value={stats.opportunities ?? 0} icon={TrendingUp} dark />
         <StatCard label="Contenido" value={(stats.blogs ?? 0) + (stats.scripts ?? 0)} icon={FileText} />
         <StatCard label="Agentes activos" value={agents.filter((a) => a.is_enabled).length} icon={Bot} />
-        <StatCard label="Contactos WA" value={stats.whatsappConversations ?? '—'} icon={Users} />
+        <StatCard label="Contactos WA" value={stats.whatsappConversations ?? 0} icon={Users} />
       </div>
 
       {/* Charts grid */}
@@ -159,7 +165,10 @@ export function DashboardPage() {
           <CardHeader>
             <div>
               <h2 className="font-semibold text-ink">Leads por fuente</h2>
-              <p className="text-xs text-ink-muted">Distribución de prospección</p>
+              <p className="text-xs text-ink-muted">
+                {sourceChart.length} fuente{sourceChart.length === 1 ? '' : 's'} · {totalLeads}{' '}
+                leads en total
+              </p>
             </div>
           </CardHeader>
           <CardBody className="h-72 pt-0">
@@ -207,19 +216,21 @@ export function DashboardPage() {
             {!hasPipeline ? (
               <p className="text-sm text-ink-muted">No hay datos</p>
             ) : (
-              Object.entries(leadStats!.byStatus).map(([status, count], i) => (
-                <div key={status} className="flex items-center gap-3">
+              pipelineRows.map((row, i) => (
+                <div key={row.key} className="flex items-center gap-3">
                   <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-nav">
                     <div
                       className="h-full rounded-full"
                       style={{
-                        width: `${Math.min(100, (count / Math.max(totalLeads, 1)) * 100)}%`,
+                        width: `${Math.min(100, (row.count / Math.max(totalLeads, 1)) * 100)}%`,
                         backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
                       }}
                     />
                   </div>
-                  <span className="w-20 text-right text-xs font-medium text-ink-muted">{status}</span>
-                  <span className="w-8 text-right text-sm font-semibold text-ink">{count}</span>
+                  <span className="w-24 text-right text-xs font-medium text-ink-muted">
+                    {row.label}
+                  </span>
+                  <span className="w-8 text-right text-sm font-semibold text-ink">{row.count}</span>
                 </div>
               ))
             )}

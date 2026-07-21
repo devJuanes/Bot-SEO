@@ -38,6 +38,7 @@ export function SectionLayout({
   description,
   tabs,
   actions,
+  showFilter = true,
   children,
 }: {
   title: string;
@@ -45,6 +46,7 @@ export function SectionLayout({
   icon?: React.ComponentType<{ className?: string }>;
   tabs?: TabItem[];
   actions?: React.ReactNode;
+  showFilter?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -56,9 +58,11 @@ export function SectionLayout({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {actions}
-          <FilterButton>
-            Filtro <ChevronDown className="h-3.5 w-3.5" />
-          </FilterButton>
+          {showFilter ? (
+            <FilterButton>
+              Filtro <ChevronDown className="h-3.5 w-3.5" />
+            </FilterButton>
+          ) : null}
         </div>
       </div>
       {tabs && tabs.length > 0 && <div className="mb-6"><TabNav tabs={tabs} /></div>}

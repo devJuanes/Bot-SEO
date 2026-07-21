@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Globe, PenLine, Sparkles } from 'lucide-react';
+import { Globe, PenLine, CheckCircle2 } from 'lucide-react';
 import { projectApi } from '../api/client';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Textarea } from '../components/ui/Input';
@@ -83,7 +83,7 @@ export function SetupPage() {
     return (
       <div className="flex min-h-[70vh] items-center justify-center p-6">
         <div className="soft-card max-w-md p-8 text-center">
-          <Sparkles className="mx-auto h-8 w-8 text-brand-600" />
+          <CheckCircle2 className="mx-auto h-8 w-8 text-brand-600" />
           <h1 className="mt-4 text-xl font-bold">Marca ya configurada</h1>
           <p className="mt-2 text-sm text-ink-muted">
             Puedes editarla en Ajustes → Marca o continuar al dashboard.

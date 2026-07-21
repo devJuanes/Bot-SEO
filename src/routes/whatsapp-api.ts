@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import {
   getConversationById,
   getOrCreateConversation,
+  getTotalUnreadCount,
   listConversations,
   listFailedCampaignTargets,
   listMessages,
@@ -108,6 +109,23 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
     }),
   );
 
+  app.get('/api/whatsapp/unread-count', async (request, reply) => {
+    try {
+      return await withTenant(request, async () => {
+        if (!(await isWhatsAppConfigured())) {
+          return { unread: 0, configured: false };
+        }
+        return {
+          unread: await getTotalUnreadCount(),
+          configured: true,
+        };
+      });
+    } catch (err) {
+      request.log.error({ err }, 'whatsapp unread-count');
+      return reply.code(500).send({ unread: 0, error: 'Error al cargar no leídos' });
+    }
+  });
+
   app.get('/api/whatsapp/conversations', async (request, reply) => {
     try {
       return await withTenant(request, async () => {
@@ -115,7 +133,7 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
           return { conversations: [], configured: false };
         }
         return {
-          conversations: await listConversations(100),
+          conversations: await listConversations(200),
           configured: true,
         };
       });
@@ -128,7 +146,10 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{
+    Params: { id: string };
+    Querystring: { markRead?: string };
+  }>(
     '/api/whatsapp/conversations/:id/messages',
     async (request, reply) => {
       try {
@@ -144,7 +165,10 @@ export async function whatsappApiRoutes(app: FastifyInstance): Promise<void> {
           }
 
           const messages = await listMessages(conversation.id);
-          await resetUnread(conversation.id).catch(() => undefined);
+          const shouldMarkRead = request.query.markRead !== '0';
+          if (shouldMarkRead) {
+            await resetUnread(conversation.id).catch(() => undefined);
+          }
 
           return {
             conversation,

@@ -69,4 +69,46 @@
   .nav-tree-line {
     @apply border-l border-border-soft ml-3 pl-3;
   }
+
+  @keyframes monitor-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+
+  @keyframes monitor-arm-l {
+    0%,
+    100% {
+      transform: rotate(-8deg);
+    }
+    50% {
+      transform: rotate(12deg);
+    }
+  }
+
+  @keyframes monitor-arm-r {
+    0%,
+    100% {
+      transform: rotate(8deg);
+    }
+    50% {
+      transform: rotate(-12deg);
+    }
+  }
+
+  .animate-monitor-bob {
+    animation: monitor-bob 1.4s ease-in-out infinite;
+  }
+
+  .animate-monitor-arm-l {
+    animation: monitor-arm-l 0.55s ease-in-out infinite;
+  }
+
+  .animate-monitor-arm-r {
+    animation: monitor-arm-r 0.55s ease-in-out infinite alternate-reverse;
+  }
 }

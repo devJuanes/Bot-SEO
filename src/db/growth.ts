@@ -1,4 +1,5 @@
 import { db } from './matu.js';
+import { countRows } from './paginate.js';
 import { getMatuByteKnowledge } from '../knowledge/matubyte.js';
 import { pickCoverImage } from '../knowledge/blog-images.js';
 import { listRecentLeads } from './leads.js';
@@ -845,6 +846,22 @@ export async function listPendingBriefs(limit = 20): Promise<ContentBrief[]> {
     .limit(limit);
   if (error) throw new Error(`listPendingBriefs: ${errMsg(error)}`);
   return (data ?? []) as ContentBrief[];
+}
+
+export async function countOpportunities(): Promise<number> {
+  return countRows(() => scoped('opportunities') as never);
+}
+
+export async function countBlogPosts(): Promise<number> {
+  return countRows(() => scoped('blog_posts') as never);
+}
+
+export async function countContentScripts(): Promise<number> {
+  return countRows(() => scoped('content_scripts') as never);
+}
+
+export async function countPendingBriefs(): Promise<number> {
+  return countRows(() => scoped('content_briefs').eq('status', 'pending') as never);
 }
 
 export async function gatherMarketSignals(): Promise<{

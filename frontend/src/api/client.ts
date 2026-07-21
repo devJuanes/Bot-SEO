@@ -61,6 +61,31 @@ function authHeaders(extra?: HeadersInit): Headers {
   return headers;
 }
 
+function connectionErrorMessage(res: Response): string {
+  if (res.status === 502 || res.status === 503 || res.status === 504) {
+    return 'El servidor API no está disponible. Ejecuta npm run dev en la raíz del proyecto.';
+  }
+  return res.statusText || `Error ${res.status}`;
+}
+
+/** Parse JSON safely — avoids "Unexpected end of JSON input" on empty proxy/backend failures. */
+export async function parseJsonResponse<T>(res: Response): Promise<T> {
+  const text = await res.text();
+  if (!text.trim()) {
+    if (!res.ok) {
+      throw new Error(connectionErrorMessage(res));
+    }
+    return {} as T;
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      res.ok ? 'Respuesta inválida del servidor' : connectionErrorMessage(res),
+    );
+  }
+}
+
 export async function api(path: string, options: RequestInit = {}): Promise<Response> {
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -75,7 +100,7 @@ export async function api(path: string, options: RequestInit = {}): Promise<Resp
   try {
     res = await fetch(path, { ...options, headers, credentials: 'include' });
   } catch {
-    throw new Error('No se pudo conectar con el servidor');
+    throw new Error('No se pudo conectar con el servidor. ¿Está corriendo npm run dev?');
   }
 
   if (res.status === 401 && !path.startsWith('/api/auth/')) {
@@ -86,13 +111,20 @@ export async function api(path: string, options: RequestInit = {}): Promise<Resp
 }
 
 export async function loadMe(): Promise<MeResponse> {
-  const res = await fetch('/api/auth/me', {
-    headers: authHeaders(),
-    credentials: 'include',
-  });
+  let res: Response;
+  try {
+    res = await fetch('/api/auth/me', {
+      headers: authHeaders(),
+      credentials: 'include',
+    });
+  } catch {
+    throw new Error('No se pudo conectar con el servidor');
+  }
   if (res.status === 401) throw new UnauthorizedError();
-  if (!res.ok) throw new Error(`me failed: ${res.status}`);
-  return res.json() as Promise<MeResponse>;
+  if (!res.ok) {
+    throw new Error(connectionErrorMessage(res));
+  }
+  return parseJsonResponse<MeResponse>(res);
 }
 
 export async function logout(): Promise<void> {
@@ -149,10 +181,17 @@ export async function apiJson<T>(path: string, options: RequestInit = {}): Promi
       ? options.headers
       : { 'Content-Type': 'application/json', ...options.headers },
   });
-  const data = await res.json().catch(() => ({}));
+  const data = await parseJsonResponse<T & { error?: string }>(res);
   if (!res.ok) {
     const err = data as { error?: string };
-    throw new Error(err.error || res.statusText);
+    throw new Error(err.error || connectionErrorMessage(res));
   }
   return data as T;
+}
+
+export async function renameProject(projectId: string, name: string): Promise<void> {
+  await apiJson(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name: name.trim() }),
+  });
 }
