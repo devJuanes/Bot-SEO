@@ -38,17 +38,36 @@ fi
 
 log "=== Deploy iniciado en ${APP_DIR} ==="
 
-# ---------- Git pull ----------
+# ---------- Git sync ----------
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 log "Rama actual: ${CURRENT_BRANCH}"
 
-if [ -n "$(git status --porcelain)" ] && [ "${ALLOW_DIRTY:-}" != "1" ]; then
-  fail "Hay cambios sin commitear. Haz commit o stash antes de deployar (o ALLOW_DIRTY=1)."
-fi
+sync_from_origin() {
+  log "git fetch origin ${CURRENT_BRANCH}"
+  git fetch origin "${CURRENT_BRANCH}" >> "${DEPLOY_LOG}" 2>&1 \
+    || fail "git fetch falló. Revisa red o permisos."
 
-log "git pull origin ${CURRENT_BRANCH}"
-git pull --ff-only origin "${CURRENT_BRANCH}" >> "${DEPLOY_LOG}" 2>&1 \
-  || fail "git pull falló. Revisa conflictos o permisos."
+  log "git reset --hard origin/${CURRENT_BRANCH}"
+  git reset --hard "origin/${CURRENT_BRANCH}" >> "${DEPLOY_LOG}" 2>&1 \
+    || fail "git reset falló."
+
+  # Limpia copias sueltas en el server; preserva secretos y logs.
+  log "git clean -fd (preserva .env y logs/)"
+  git clean -fd -e .env -e logs >> "${DEPLOY_LOG}" 2>&1 || true
+}
+
+if [ -n "$(git status --porcelain)" ]; then
+  if [ "${ALLOW_DIRTY:-}" = "1" ] || [ "${SYNC_FROM_ORIGIN:-}" = "1" ]; then
+    log "Working tree sucio — sincronizando con origin/${CURRENT_BRANCH}"
+    sync_from_origin
+  else
+    fail "Hay cambios sin commitear. Haz commit, stash, o usa ALLOW_DIRTY=1 / SYNC_FROM_ORIGIN=1."
+  fi
+else
+  log "git pull --ff-only origin ${CURRENT_BRANCH}"
+  git pull --ff-only origin "${CURRENT_BRANCH}" >> "${DEPLOY_LOG}" 2>&1 \
+    || fail "git pull falló. Prueba SYNC_FROM_ORIGIN=1 ./deploy.sh"
+fi
 
 NEW_COMMIT="$(git rev-parse --short HEAD)"
 log "Commit desplegado: ${NEW_COMMIT}"
@@ -76,16 +95,16 @@ log "npm run build:ui (vite)"
 npm run build:ui >> "${DEPLOY_LOG}" 2>&1 \
   || fail "build:ui falló. Revisa ${DEPLOY_LOG}."
 
-# Ahora sí podemos podar dev deps (ya tenemos dist/ y frontend/dist/)
-log "npm prune --omit=dev"
-npm prune --omit=dev >> "${DEPLOY_LOG}" 2>&1 || true
-
-# ---------- Migrate ----------
+# Migrate antes de podar dev deps (migrate usa tsx)
 if grep -q '"migrate"' package.json; then
   log "npm run migrate"
   npm run migrate >> "${DEPLOY_LOG}" 2>&1 \
     || log "WARN: migrate falló (continúa — puede ser no crítico)"
 fi
+
+# Ahora sí podemos podar dev deps (ya tenemos dist/ y frontend/dist/)
+log "npm prune --omit=dev"
+npm prune --omit=dev >> "${DEPLOY_LOG}" 2>&1 || true
 
 # ---------- Restart ----------
 restart_with_pm2() {
