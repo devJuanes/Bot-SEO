@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
   --color-brand-50: #fff1f2;
   --color-brand-100: #ffe4e6;
   --color-brand-200: #fecdd3;
@@ -25,7 +26,7 @@
 
 @layer base {
   html {
-    @apply antialiased;
+    @apply antialiased scroll-smooth;
   }
   body {
     @apply bg-surface text-ink font-sans;
@@ -34,7 +35,6 @@
     @apply min-h-screen;
   }
 
-  /* Brand-tinted thin scrollbars */
   * {
     scrollbar-width: thin;
     scrollbar-color: color-mix(in srgb, var(--color-brand-600) 35%, transparent) transparent;
@@ -60,6 +60,10 @@
 }
 
 @layer utilities {
+  .font-display {
+    font-family: var(--font-display);
+  }
+
   .soft-card {
     @apply rounded-3xl bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_24px_rgba(0,0,0,0.03)];
   }
@@ -68,6 +72,110 @@
   }
   .nav-tree-line {
     @apply border-l border-border-soft ml-3 pl-3;
+  }
+
+  .landing-glow {
+    background:
+      radial-gradient(ellipse 80% 55% at 85% -10%, rgba(225, 29, 72, 0.18), transparent 55%),
+      radial-gradient(ellipse 55% 45% at 0% 90%, rgba(244, 63, 94, 0.1), transparent 50%),
+      radial-gradient(ellipse 40% 30% at 50% 50%, rgba(225, 29, 72, 0.04), transparent 70%);
+  }
+
+  .landing-grid {
+    background-image:
+      linear-gradient(rgba(28, 28, 30, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(28, 28, 30, 0.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 20%, black, transparent);
+  }
+
+  @keyframes landing-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes landing-float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-10px);
+    }
+  }
+
+  @keyframes landing-float-slow {
+    0%,
+    100% {
+      transform: translateY(0) rotate(-1deg);
+    }
+    50% {
+      transform: translateY(-14px) rotate(1deg);
+    }
+  }
+
+  @keyframes landing-marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+
+  @keyframes landing-shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  @keyframes landing-pulse-ring {
+    0% {
+      transform: scale(0.92);
+      opacity: 0.55;
+    }
+    70% {
+      transform: scale(1.15);
+      opacity: 0;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  .landing-fade-up {
+    animation: landing-fade-up 0.7s ease-out both;
+  }
+  .landing-fade-up-delay-1 {
+    animation-delay: 0.12s;
+  }
+  .landing-fade-up-delay-2 {
+    animation-delay: 0.24s;
+  }
+  .landing-float {
+    animation: landing-float 5s ease-in-out infinite;
+  }
+  .landing-float-slow {
+    animation: landing-float-slow 7s ease-in-out infinite;
+  }
+  .landing-marquee {
+    animation: landing-marquee 32s linear infinite;
+  }
+  .landing-shimmer {
+    background-size: 200% 100%;
+    animation: landing-shimmer 3.5s linear infinite;
+  }
+  .landing-pulse-ring {
+    animation: landing-pulse-ring 2.4s ease-out infinite;
   }
 
   @keyframes monitor-bob {
@@ -79,7 +187,6 @@
       transform: translateY(-5px);
     }
   }
-
   @keyframes monitor-arm-l {
     0%,
     100% {
@@ -89,7 +196,6 @@
       transform: rotate(12deg);
     }
   }
-
   @keyframes monitor-arm-r {
     0%,
     100% {
@@ -99,16 +205,27 @@
       transform: rotate(-12deg);
     }
   }
-
   .animate-monitor-bob {
     animation: monitor-bob 1.4s ease-in-out infinite;
   }
-
   .animate-monitor-arm-l {
     animation: monitor-arm-l 0.55s ease-in-out infinite;
   }
-
   .animate-monitor-arm-r {
     animation: monitor-arm-r 0.55s ease-in-out infinite alternate-reverse;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .landing-fade-up,
+    .landing-float,
+    .landing-float-slow,
+    .landing-marquee,
+    .landing-shimmer,
+    .landing-pulse-ring,
+    .animate-monitor-bob,
+    .animate-monitor-arm-l,
+    .animate-monitor-arm-r {
+      animation: none !important;
+    }
   }
 }

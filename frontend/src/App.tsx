@@ -5,6 +5,7 @@ import { LeadsPage } from './pages/LeadsPage';
 import { LeadDetailPage } from './pages/LeadDetailPage';
 import { ContentPage } from './pages/ContentPage';
 import { LoginPage, RegisterPage } from './pages/auth/AuthPages';
+import { PaymentResultPage } from './pages/auth/PaymentResultPage';
 import { LandingLayout } from './pages/landing/LandingLayout';
 import { HomePage } from './pages/landing/HomePage';
 import { FeaturesPage } from './pages/landing/FeaturesPage';
@@ -55,6 +56,7 @@ export function App() {
       </Route>
       <Route path="/acceso/iniciar-sesion" element={<LoginPage />} />
       <Route path="/acceso/crear-cuenta" element={<RegisterPage />} />
+      <Route path="/acceso/pago-resultado" element={<PaymentResultPage />} />
       <Route path="/login" element={<Navigate to="/acceso/iniciar-sesion" replace />} />
       <Route path="/register" element={<Navigate to="/acceso/crear-cuenta" replace />} />
 

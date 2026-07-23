@@ -110,4 +110,5 @@ export async function ensureSchema(): Promise<void> {
   await applySqlFile('sql/tenancy.sql');
   await applySqlFile('sql/automation.sql');
   await applySqlFile('sql/contact.sql');
+  await applySqlFile('sql/billing.sql');
 }

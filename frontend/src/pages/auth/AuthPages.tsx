@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { CheckCircle2, Gift, CreditCard } from 'lucide-react';
 import { useAuth } from '../../auth/AuthContext';
 import { parseJsonResponse } from '../../api/client';
 import { Button } from '../../components/ui/Button';
@@ -65,10 +66,33 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
   const next = params.get('next') || nextDefault;
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [inviteValid, setInviteValid] = useState<boolean | null>(null);
+  const [inviteCode, setInviteCode] = useState('');
 
   useEffect(() => {
     if (!loading && isAuthenticated) navigate(next, { replace: true });
   }, [isAuthenticated, loading, next, navigate]);
+
+  useEffect(() => {
+    if (mode !== 'register' || !inviteCode.trim()) {
+      setInviteValid(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch('/api/billing/validate-invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: inviteCode.trim() }),
+        });
+        const data = await parseJsonResponse<{ valid?: boolean }>(res);
+        setInviteValid(Boolean(data.valid));
+      } catch {
+        setInviteValid(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [inviteCode, mode]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -77,54 +101,93 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
     const form = new FormData(e.currentTarget);
     const email = String(form.get('email') || '').trim();
     const password = String(form.get('password') || '');
-    const body =
-      mode === 'login'
-        ? { email, password }
-        : {
-            email,
-            password,
-            name: String(form.get('name') || '').trim() || email,
-            organizationName: String(form.get('org') || '').trim() || undefined,
-          };
+    const invitationCode = String(form.get('invitationCode') || '').trim();
+
+    if (mode === 'login') {
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await parseJsonResponse<{
+          error?: string;
+          token?: string;
+          project?: { id: string };
+          projects?: Array<{ id: string }>;
+          organization?: { id: string };
+          organizations?: Array<{ id: string }>;
+        }>(res);
+        if (!res.ok) throw new Error(data.error || 'Error de autenticación');
+        const projectId =
+          data.project?.id ||
+          (data.projects && data.projects[0] && data.projects[0].id) ||
+          null;
+        const orgId =
+          data.organization?.id ||
+          (data.organizations && data.organizations[0] && data.organizations[0].id) ||
+          null;
+        if (!data.token) throw new Error('El servidor no devolvió token de sesión');
+        login(data.token, projectId, orgId);
+        navigate(next, { replace: true });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    const body = {
+      email,
+      password,
+      name: String(form.get('name') || '').trim() || email,
+      organizationName: String(form.get('org') || '').trim() || undefined,
+      invitationCode: invitationCode || undefined,
+    };
 
     try {
-      let res: Response;
-      try {
-        res = await fetch(
-          mode === 'login' ? '/api/auth/login' : '/api/auth/register',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify(body),
-          },
-        );
-      } catch {
-        throw new Error('No se pudo conectar con el servidor. Ejecuta npm run dev.');
+      if (invitationCode) {
+        const res = await fetch('/api/auth/register', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(body),
+        });
+        const data = await parseJsonResponse<{
+          error?: string;
+          token?: string;
+          project?: { id: string };
+          organization?: { id: string };
+          vip?: boolean;
+        }>(res);
+        if (!res.ok) throw new Error(data.error || 'Error al crear la cuenta');
+        if (!data.token) throw new Error('El servidor no devolvió token de sesión');
+        login(data.token, data.project?.id ?? null, data.organization?.id ?? null);
+        navigate('/setup', { replace: true });
+        return;
       }
-      const data = await parseJsonResponse<{
+
+      const checkoutRes = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const checkoutData = await parseJsonResponse<{
         error?: string;
-        token?: string;
-        project?: { id: string };
-        projects?: Array<{ id: string }>;
-        organization?: { id: string };
-        organizations?: Array<{ id: string }>;
-      }>(res);
-      if (!res.ok) throw new Error(data.error || 'Error de autenticación');
-      const projectId =
-        data.project?.id ||
-        (data.projects && data.projects[0] && data.projects[0].id) ||
-        null;
-      const orgId =
-        data.organization?.id ||
-        (data.organizations && data.organizations[0] && data.organizations[0].id) ||
-        null;
-      if (!data.token) throw new Error('El servidor no devolvió token de sesión');
-      login(data.token, projectId, orgId);
-      navigate(mode === 'register' ? '/setup' : next, { replace: true });
+        checkoutUrl?: string;
+        reference?: string;
+      }>(checkoutRes);
+      if (!checkoutRes.ok) {
+        throw new Error(checkoutData.error || 'No se pudo iniciar el pago');
+      }
+      if (!checkoutData.checkoutUrl) {
+        throw new Error('No se recibió URL de pago');
+      }
+      window.location.href = checkoutData.checkoutUrl;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-    } finally {
       setSubmitting(false);
     }
   }
@@ -132,6 +195,8 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
   if (loading) {
     return <PageLoader subtitle="Verificando tu sesión…" />;
   }
+
+  const hasInvite = inviteCode.trim().length > 0;
 
   return (
     <AuthShell mode={mode}>
@@ -164,6 +229,21 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
         )}
       </p>
 
+      {mode === 'register' && (
+        <div className="mt-4 rounded-2xl border border-border-soft bg-white p-4 text-sm">
+          <div className="flex items-start gap-3">
+            <Gift className="mt-0.5 h-5 w-5 shrink-0 text-brand-600" />
+            <div>
+              <p className="font-medium text-ink">¿Tienes código de invitación?</p>
+              <p className="mt-1 text-ink-muted">
+                Con un código VIP creas tu cuenta sin pagar. Sin código, el plan Pro cuesta{' '}
+                <strong className="text-ink">$50.000 COP/mes</strong>.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="mt-6 space-y-3.5">
         {mode === 'register' && (
           <Field>
@@ -186,18 +266,58 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
           />
         </Field>
         {mode === 'register' && (
-          <Field>
-            <label className="mb-1 block text-sm font-medium text-ink">Organización</label>
-            <Input name="org" placeholder="Mi empresa" />
-          </Field>
+          <>
+            <Field>
+              <label className="mb-1 block text-sm font-medium text-ink">Organización</label>
+              <Input name="org" placeholder="Mi empresa" />
+            </Field>
+            <Field>
+              <label className="mb-1 block text-sm font-medium text-ink">
+                Código de invitación <span className="text-ink-muted">(opcional)</span>
+              </label>
+              <Input
+                name="invitationCode"
+                placeholder="MATUBYTE-VIP-2026"
+                value={inviteCode}
+                onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+              />
+              {inviteValid === true && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-emerald-600">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  Código válido — acceso VIP sin pago
+                </p>
+              )}
+              {inviteValid === false && inviteCode.trim() && (
+                <p className="mt-1 text-xs text-brand-600">Código inválido o expirado</p>
+              )}
+            </Field>
+          </>
         )}
         {error && (
           <p className="rounded-2xl bg-brand-50 px-3 py-2 text-sm text-brand-700">{error}</p>
         )}
         <Button type="submit" className="w-full" loading={submitting}>
-          {mode === 'login' ? 'Entrar' : 'Crear cuenta'}
+          {mode === 'login' ? (
+            'Entrar'
+          ) : hasInvite ? (
+            'Crear cuenta VIP'
+          ) : (
+            <span className="inline-flex items-center gap-2">
+              <CreditCard className="h-4 w-4" />
+              Continuar al pago — $50.000 COP
+            </span>
+          )}
         </Button>
       </form>
+
+      {mode === 'register' && !hasInvite && (
+        <p className="mt-4 text-center text-xs text-ink-muted">
+          Plan Enterprise para agencias:{' '}
+          <Link to="/contacto" className="font-medium text-brand-600 hover:underline">
+            habla con ventas
+          </Link>
+        </p>
+      )}
 
       <p className="mt-6 text-center text-sm text-ink-muted">
         <Link to="/" className="font-medium text-brand-600 hover:underline">

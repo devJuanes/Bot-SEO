@@ -26,6 +26,7 @@ import { notificationsRoutes } from './routes/notifications-api.js';
 import { supportApiRoutes } from './routes/support-api.js';
 import { contactApiRoutes } from './routes/contact-api.js';
 import { saasApiRoutes } from './routes/saas-api.js';
+import { billingRoutes } from './routes/billing.js';
 import { registerSpaRoutes } from './routes/spa.js';
 
 async function main(): Promise<void> {
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
 
   await registerTenantGuard(app);
   await app.register(authRoutes);
+  await app.register(billingRoutes);
   await app.register(tenancyRoutes);
   await app.register(dashboardRoutes);
   await app.register(leadsApiRoutes);

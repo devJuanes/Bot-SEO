@@ -131,9 +131,20 @@ const envSchema = z.object({
   CRON_SOCIAL_CREATOR: z.string().min(1).default('0 9 * * *'),
   CRON_COMMUNITY_AGENT: z.string().min(1).default('0 */3 * * *'),
   CRON_FACEBOOK_PUBLISHER: z.string().min(1).default('0 10,16,22 * * *'),
+
+  PAYMATUBYTE_URL: z
+    .string()
+    .url()
+    .default('https://pay.matubyte.com'),
+  PAYMATUBYTE_API_KEY: z.string().optional().or(z.literal('')),
+  APP_PUBLIC_URL: z
+    .string()
+    .url()
+    .default('http://localhost:5173'),
 });
 
 export type Env = z.infer<typeof envSchema> & {
+  PAYMATUBYTE_API_KEY?: string;
   LEAD_HUNTER_SECTOR?: string;
   LEAD_HUNTER_QUERY?: string;
   WHATSAPP_ACCESS_TOKEN?: string;
@@ -195,6 +206,12 @@ function loadEnv(): Env {
     META_APP_ID: parsed.data.META_APP_ID || undefined,
     FB_PAGE_ID: parsed.data.FB_PAGE_ID || undefined,
     FB_PAGE_ACCESS_TOKEN: parsed.data.FB_PAGE_ACCESS_TOKEN || undefined,
+    PAYMATUBYTE_API_KEY: parsed.data.PAYMATUBYTE_API_KEY || undefined,
+    APP_PUBLIC_URL:
+      parsed.data.APP_PUBLIC_URL ||
+      (parsed.data.NODE_ENV === 'production'
+        ? 'https://growth.matubyte.com'
+        : 'http://localhost:5173'),
   };
 }
 

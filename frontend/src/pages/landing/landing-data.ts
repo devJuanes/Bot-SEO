@@ -20,10 +20,40 @@ export const LANDING_NAV = [
   { to: '/contacto', label: 'Contacto' },
 ] as const;
 
+export const MARQUEE_ITEMS = [
+  'Lead Hunter',
+  'WhatsApp Inbox',
+  'Facebook con aprobación',
+  'Flujos visuales',
+  'Monitor en vivo',
+  'Pipeline Kanban',
+  'Agentes custom',
+  'Multi-proyecto',
+];
+
 export const STATS = [
   { value: 'Multi-proyecto', label: 'Una cuenta, varios negocios aislados por tenant' },
-  { value: 'Tiempo real', label: 'WhatsApp, monitor de agentes y notificaciones push' },
-  { value: 'LatAm', label: 'Diseñado para empresas que venden por WhatsApp y redes' },
+  { value: 'Tiempo real', label: 'WhatsApp, monitor de agentes y notificaciones' },
+  { value: 'LatAm', label: 'Hecho para vender por WhatsApp y redes' },
+];
+
+export const HOME_FEATURES = [
+  {
+    title: 'Prospección real',
+    body: 'Agentes buscan negocios en Google Maps según tu sector y ciudad.',
+  },
+  {
+    title: 'WhatsApp operativo',
+    body: 'Inbox en vivo, modo humano/bot y campañas con plantillas Meta.',
+  },
+  {
+    title: 'Facebook con control',
+    body: 'La IA propone; tú apruebas. Nada se publica sin tu OK.',
+  },
+  {
+    title: 'Automatiza sin código',
+    body: 'Flujos visuales que conectan leads, agentes y mensajes.',
+  },
 ];
 
 export interface FeatureModule {
@@ -183,43 +213,48 @@ export const STEPS = [
 
 export const PRICING_TIERS = [
   {
-    name: 'Prueba',
-    price: 'Gratis',
-    period: 'sin tarjeta',
-    description: 'Ideal para evaluar la plataforma con un proyecto y agentes básicos.',
+    name: 'Pro',
+    price: '$50.000',
+    period: 'COP / mes',
+    description:
+      'Acceso completo a agentes de leads, WhatsApp, Facebook, flujos y automatizaciones para un proyecto.',
     features: [
-      '1 proyecto incluido',
       'Lead Hunter y pipeline Kanban',
-      'WhatsApp inbox y plantillas',
-      'Monitor y dashboard',
+      'WhatsApp inbox, campañas y plantillas',
+      'Facebook con cola de aprobación',
+      'Agentes de contenido y blog',
+      'Flujos y monitor en vivo',
+      'Pago seguro con PSE, Nequi o tarjeta',
+    ],
+    cta: 'Crear cuenta',
+    highlighted: true,
+  },
+  {
+    name: 'VIP',
+    price: 'Invitación',
+    period: 'código requerido',
+    description:
+      'Acceso completo sin pago si tienes un código de invitación de MatuByte o un partner.',
+    features: [
+      'Todo lo del plan Pro',
+      'Activación inmediata sin tarjeta',
+      'Ideal para beta testers y aliados',
+      'Soporte prioritario de onboarding',
     ],
     cta: 'Crear cuenta',
     highlighted: false,
   },
   {
-    name: 'Growth',
+    name: 'Enterprise',
     price: 'A medida',
-    period: 'por organización',
-    description: 'Para equipos que operan varios proyectos, campañas y automatizaciones avanzadas.',
-    features: [
-      'Multi-proyecto y multi-usuario',
-      'Flujos ilimitados y agentes custom',
-      'Facebook con cola de aprobación',
-      'Soporte prioritario',
-    ],
-    cta: 'Solicitar demo',
-    highlighted: true,
-  },
-  {
-    name: 'Agencia',
-    price: 'Enterprise',
     period: 'contacto comercial',
-    description: 'Para agencias que gestionan marcas de clientes con aislamiento total por tenant.',
+    description:
+      'Para agencias y empresas que gestionan múltiples marcas con aislamiento total por tenant.',
     features: [
+      'Multi-proyecto ilimitado',
       'Onboarding asistido',
       'Integraciones y webhooks dedicados',
       'SLA y soporte técnico',
-      'Personalización de agentes',
     ],
     cta: 'Hablar con ventas',
     highlighted: false,
@@ -228,8 +263,12 @@ export const PRICING_TIERS = [
 
 export const FAQ_ITEMS = [
   {
-    q: '¿Necesito tarjeta de crédito para probar?',
-    a: 'No. Puedes crear una cuenta gratis y configurar tu primer proyecto sin ingresar datos de pago.',
+    q: '¿Cuánto cuesta Growth Factory?',
+    a: 'El plan Pro cuesta $50.000 COP al mes e incluye agentes de leads, WhatsApp, Facebook y automatizaciones. Si tienes un código de invitación VIP, creas tu cuenta sin pagar.',
+  },
+  {
+    q: '¿Cómo funciona el código de invitación?',
+    a: 'Al registrarte, ingresa tu código en el campo opcional. Si es válido, tu cuenta se activa con acceso VIP completo sin pasar por el pago.',
   },
   {
     q: '¿Cómo conecto WhatsApp Business?',

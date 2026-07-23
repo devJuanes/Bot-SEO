@@ -10,7 +10,7 @@ export function PricingPage() {
     <>
       <PageMeta
         title="Precios"
-        description="Prueba gratis MatuByte Growth Factory sin tarjeta. Planes Growth y Agencia a medida para equipos multi-proyecto con automatizaciones y soporte prioritario."
+        description="Plan Pro desde $50.000 COP/mes. Código de invitación VIP para acceso sin pago. Enterprise a medida para agencias."
         path="/precios"
       />
 
@@ -18,11 +18,11 @@ export function PricingPage() {
         <div className="mx-auto max-w-6xl px-5 py-16 text-center">
           <p className="text-xs font-semibold uppercase tracking-widest text-brand-600">Precios</p>
           <h1 className="mt-2 text-4xl font-bold tracking-tight sm:text-5xl">
-            Empieza gratis, escala cuando lo necesites
+            Plan Pro desde $50.000 COP/mes
           </h1>
           <p className="mx-auto mt-4 max-w-2xl text-base text-ink-muted">
-            Sin sorpresas: prueba la plataforma completa con un proyecto. Cuando tu equipo crece,
-            hablamos de un plan a medida.
+            Paga con PSE, Nequi o tarjeta. ¿Tienes código de invitación? Crea tu cuenta VIP sin
+            costo. Enterprise para agencias — habla con ventas.
           </p>
         </div>
       </section>

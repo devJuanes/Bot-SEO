@@ -5,9 +5,9 @@ import {
   createUser,
   listOrganizationsForUser,
   listProjects,
-  registerAndBootstrap,
   revokeSessionByJwt,
 } from '../tenancy/store.js';
+import { registerWithInvitation } from '../services/billing.js';
 import {
   clearAuthCookie,
   extractBearerToken,
@@ -23,6 +23,7 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       name?: string;
       organizationName?: string;
       projectName?: string;
+      invitationCode?: string;
     };
 
     if (!body.email || !body.password || !body.name) {
@@ -34,13 +35,24 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'password must be at least 8 characters' });
     }
 
+    if (!body.invitationCode?.trim()) {
+      return reply.code(402).send({
+        error: 'Se requiere código de invitación o pago del plan Pro',
+        requiresPayment: true,
+        plan: 'plan-pro',
+        amount: 50000,
+        currency: 'COP',
+      });
+    }
+
     try {
-      const result = await registerAndBootstrap({
+      const result = await registerWithInvitation({
         email: body.email,
         password: body.password,
         name: body.name,
         organizationName: body.organizationName,
         projectName: body.projectName,
+        invitationCode: body.invitationCode,
       });
       setAuthCookie(reply, result.token);
       return {
@@ -48,6 +60,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
         organization: result.organization,
         project: result.project,
         token: result.token,
+        plan: result.plan,
+        vip: true,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
